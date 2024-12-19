@@ -6923,6 +6923,7 @@ var wasmImports = {
  /** @export */ invoke_iiiiiiiiiii: invoke_iiiiiiiiiii,
  /** @export */ invoke_iiiiiiiiiiii: invoke_iiiiiiiiiiii,
  /** @export */ invoke_iiiiiiiiiiiii: invoke_iiiiiiiiiiiii,
+ /** @export */ invoke_j: invoke_j,
  /** @export */ invoke_jiiii: invoke_jiiii,
  /** @export */ invoke_v: invoke_v,
  /** @export */ invoke_vi: invoke_vi,
@@ -7075,6 +7076,8 @@ var ___set_stack_limits = Module["___set_stack_limits"] = createExportWrapper("_
 
 var dynCall_jiji = Module["dynCall_jiji"] = createExportWrapper("dynCall_jiji");
 
+var dynCall_j = Module["dynCall_j"] = createExportWrapper("dynCall_j");
+
 var dynCall_viijii = Module["dynCall_viijii"] = createExportWrapper("dynCall_viijii");
 
 var dynCall_jiiii = Module["dynCall_jiiii"] = createExportWrapper("dynCall_jiiii");
@@ -7084,6 +7087,17 @@ var dynCall_iiiiij = Module["dynCall_iiiiij"] = createExportWrapper("dynCall_iii
 var dynCall_iiiiijj = Module["dynCall_iiiiijj"] = createExportWrapper("dynCall_iiiiijj");
 
 var dynCall_iiiiiijj = Module["dynCall_iiiiiijj"] = createExportWrapper("dynCall_iiiiiijj");
+
+function invoke_iiii(index, a1, a2, a3) {
+ var sp = stackSave();
+ try {
+  return getWasmTableEntry(index)(a1, a2, a3);
+ } catch (e) {
+  stackRestore(sp);
+  if (!(e instanceof EmscriptenEH)) throw e;
+  _setThrew(1, 0);
+ }
+}
 
 function invoke_ii(index, a1) {
  var sp = stackSave();
@@ -7111,17 +7125,6 @@ function invoke_vii(index, a1, a2) {
  var sp = stackSave();
  try {
   getWasmTableEntry(index)(a1, a2);
- } catch (e) {
-  stackRestore(sp);
-  if (!(e instanceof EmscriptenEH)) throw e;
-  _setThrew(1, 0);
- }
-}
-
-function invoke_iiii(index, a1, a2, a3) {
- var sp = stackSave();
- try {
-  return getWasmTableEntry(index)(a1, a2, a3);
  } catch (e) {
   stackRestore(sp);
   if (!(e instanceof EmscriptenEH)) throw e;
@@ -7320,6 +7323,17 @@ function invoke_viiiiiiiiiiiiiii(index, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10,
  var sp = stackSave();
  try {
   getWasmTableEntry(index)(a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15);
+ } catch (e) {
+  stackRestore(sp);
+  if (!(e instanceof EmscriptenEH)) throw e;
+  _setThrew(1, 0);
+ }
+}
+
+function invoke_j(index) {
+ var sp = stackSave();
+ try {
+  return dynCall_j(index);
  } catch (e) {
   stackRestore(sp);
   if (!(e instanceof EmscriptenEH)) throw e;

@@ -7,6 +7,8 @@
 #include <queue>
 #include <atomic>
 #include <condition_variable>
+#include <array>
+#include <chrono>
 
 #include <emscripten.h>
 #include <emscripten/html5.h> // For emscripten_request_animation_frame_loop
@@ -120,21 +122,23 @@ private:
 std::atomic<bool> imageGenRunning(false);
 std::thread imageGenThread;
 
-// ImageFlasher class definition
+// ImageFlasher class definition with Double Buffering
 class ImageFlasher {
 public:
-    ImageFlasher(wgpu::Device device, uint32_t ringBufferSize);
+    ImageFlasher(wgpu::Device device, uint32_t ringBufferSize, float imageSwitchInterval);
     ~ImageFlasher();
 
     void pushImage(const ImageData& image);
     void update(); // Call in main loop
     void render(wgpu::RenderPassEncoder& pass);
+    void swapBuffers(); // Swap front and back buffers
 
     wgpu::PipelineLayout getPipelineLayout() const { return pipelineLayout_; }
 
 private:
-    void uploadImage(const ImageData& image);
-
+    void uploadImage(const ImageData& image, int buffer);
+    float imageSwitchInterval_; // Time in seconds between image switches
+    std::chrono::steady_clock::time_point lastSwitchTime_[2];
     static const uint32_t maxLayersPerArray = 256;
 
     wgpu::Device device_;
@@ -143,40 +147,54 @@ private:
     uint32_t ringBufferSize_;
     uint32_t textureWidth_ = 512;
     uint32_t textureHeight_ = 512;
-    uint32_t writeIndex_;
-    uint32_t displayIndex_;
+    uint32_t writeIndex_[2];
+    uint32_t displayIndex_[2];
+    uint32_t imagesInBuffer_[2];
 
     wgpu::Sampler sampler_;
-    wgpu::Buffer uniformBuffer_;
+    std::array<wgpu::Buffer, 2> uniformBuffers_;
     wgpu::PipelineLayout pipelineLayout_;
     wgpu::BindGroupLayout bindGroupLayout_;
 
-    std::vector<wgpu::Texture> textureArrays_;
-    std::vector<wgpu::TextureView> textureViews_;
-    std::vector<wgpu::BindGroup> bindGroups_;
+    // Double Buffered Resources
+    std::array<std::vector<wgpu::Texture>, 2> textureArrays_;
+    std::array<std::vector<wgpu::TextureView>, 2> textureViews_;
+    std::array<std::vector<wgpu::BindGroup>, 2> bindGroups_;
 
     mutable std::mutex mutex_;
     ThreadSafeQueue<ImageData> imageQueue_;
+    int bufferIndex_; // 0 or 1
 };
 
-// ImageFlasher constructor
-ImageFlasher::ImageFlasher(wgpu::Device device, uint32_t ringBufferSize)
+// ImageFlasher constructor with Double Buffering
+ImageFlasher::ImageFlasher(wgpu::Device device, uint32_t ringBufferSize, float imageSwitchInterval)
         : device_(device),
           queue_(device.GetQueue()),
           ringBufferSize_(ringBufferSize),
-          writeIndex_(0),
-          displayIndex_(0) {
+          bufferIndex_(0),
+          imageSwitchInterval_(imageSwitchInterval) {
     std::cout << "Initializing ImageFlasher with ring buffer size: " << ringBufferSize_ << std::endl;
+
+    // Initialize buffer indices and counters
+    for (int b = 0; b < 2; ++b) {
+        writeIndex_[b] = 0;
+        displayIndex_[b] = 0;
+        imagesInBuffer_[b] = 0;
+        lastSwitchTime_[b] = std::chrono::steady_clock::now();
+    }
 
     // Compute number of texture arrays needed
     uint32_t numTextureArrays = (ringBufferSize_ + maxLayersPerArray - 1) / maxLayersPerArray;
     std::cout << "Number of texture arrays: " << numTextureArrays << std::endl;
 
-    textureArrays_.resize(numTextureArrays);
-    textureViews_.resize(numTextureArrays);
-    bindGroups_.resize(numTextureArrays);
+    // Resize texture arrays, views, and bind groups for both buffers
+    for (int b = 0; b < 2; ++b) {
+        textureArrays_[b].resize(numTextureArrays);
+        textureViews_[b].resize(numTextureArrays);
+        bindGroups_[b].resize(numTextureArrays);
+    }
 
-    // Create sampler
+    // Create sampler (shared between buffers)
     wgpu::SamplerDescriptor samplerDesc = {};
     samplerDesc.addressModeU = wgpu::AddressMode::ClampToEdge;
     samplerDesc.addressModeV = wgpu::AddressMode::ClampToEdge;
@@ -185,14 +203,7 @@ ImageFlasher::ImageFlasher(wgpu::Device device, uint32_t ringBufferSize)
     sampler_ = device_.CreateSampler(&samplerDesc);
     std::cout << "Sampler created." << std::endl;
 
-    // Create uniform buffer for layer index
-    wgpu::BufferDescriptor uniformBufferDesc = {};
-    uniformBufferDesc.size = 16;
-    uniformBufferDesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-    uniformBuffer_ = device_.CreateBuffer(&uniformBufferDesc);
-    std::cout << "Uniform buffer created." << std::endl;
-
-    // Create bind group layout
+    // Create bind group layout (shared between buffers)
     wgpu::BindGroupLayoutEntry bglEntries[3] = {};
     bglEntries[0].binding = 0;
     bglEntries[0].visibility = wgpu::ShaderStage::Fragment;
@@ -216,59 +227,68 @@ ImageFlasher::ImageFlasher(wgpu::Device device, uint32_t ringBufferSize)
     bindGroupLayout_ = device_.CreateBindGroupLayout(&bglDesc);
     std::cout << "Bind group layout created." << std::endl;
 
-    // Create pipeline layout
+    // Create pipeline layout (shared between buffers)
     wgpu::PipelineLayoutDescriptor plDesc = {};
     plDesc.bindGroupLayoutCount = 1;
     plDesc.bindGroupLayouts = &bindGroupLayout_;
     pipelineLayout_ = device_.CreatePipelineLayout(&plDesc);
     std::cout << "Pipeline layout created." << std::endl;
 
-    // Now create the texture arrays, texture views, and bind groups
-    for (uint32_t i = 0; i < numTextureArrays; ++i) {
-        uint32_t layersInThisArray = maxLayersPerArray;
-        if (i == numTextureArrays -1 && (ringBufferSize_ % maxLayersPerArray != 0)) {
-            layersInThisArray = ringBufferSize_ % maxLayersPerArray;
+    // Initialize resources for both buffers
+    for (int b = 0; b < 2; ++b) {
+        // Create uniform buffer for each buffer
+        wgpu::BufferDescriptor uniformBufferDesc = {};
+        uniformBufferDesc.size = 16;
+        uniformBufferDesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+        uniformBuffers_[b] = device_.CreateBuffer(&uniformBufferDesc);
+        std::cout << "Uniform buffer " << b << " created." << std::endl;
+
+        // Create texture arrays, texture views, and bind groups for each buffer
+        for (uint32_t i = 0; i < numTextureArrays; ++i) {
+            uint32_t layersInThisArray = maxLayersPerArray;
+            if (i == numTextureArrays -1 && (ringBufferSize_ % maxLayersPerArray != 0)) {
+                layersInThisArray = ringBufferSize_ % maxLayersPerArray;
+            }
+
+            // Create texture array
+            wgpu::TextureDescriptor textureDesc = {};
+            textureDesc.size.width = textureWidth_;
+            textureDesc.size.height = textureHeight_;
+            textureDesc.size.depthOrArrayLayers = layersInThisArray;
+            textureDesc.format = wgpu::TextureFormat::RGBA8Unorm;
+            textureDesc.usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst;
+            wgpu::Texture textureArray = device_.CreateTexture(&textureDesc);
+            textureArrays_[b][i] = textureArray;
+            std::cout << "Buffer " << b << ": Texture array " << i << " created with " << layersInThisArray << " layers." << std::endl;
+
+            // Create texture view
+            wgpu::TextureViewDescriptor viewDesc = {};
+            viewDesc.dimension = wgpu::TextureViewDimension::e2DArray;
+            textureViews_[b][i] = textureArray.CreateView(&viewDesc);
+            std::cout << "Buffer " << b << ": Texture view " << i << " created." << std::endl;
+
+            // Create bind group
+            wgpu::BindGroupEntry bgEntries[3] = {};
+            bgEntries[0].binding = 0;
+            bgEntries[0].buffer = uniformBuffers_[b];
+            bgEntries[0].offset = 0;
+            bgEntries[0].size = 16;
+
+            bgEntries[1].binding = 1;
+            bgEntries[1].textureView = textureViews_[b][i];
+
+            bgEntries[2].binding = 2;
+            bgEntries[2].sampler = sampler_;
+
+            wgpu::BindGroupDescriptor bgDesc = {};
+            bgDesc.layout = bindGroupLayout_;
+            bgDesc.entryCount = 3;
+            bgDesc.entries = bgEntries;
+
+            bindGroups_[b][i] = device_.CreateBindGroup(&bgDesc);
+            std::cout << "Buffer " << b << ": Bind group " << i << " created." << std::endl;
         }
-
-        // Create texture array
-        wgpu::TextureDescriptor textureDesc = {};
-        textureDesc.size.width = textureWidth_;
-        textureDesc.size.height = textureHeight_;
-        textureDesc.size.depthOrArrayLayers = layersInThisArray;
-        textureDesc.format = wgpu::TextureFormat::RGBA8Unorm;
-        textureDesc.usage = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst;
-        wgpu::Texture textureArray = device_.CreateTexture(&textureDesc);
-        textureArrays_[i] = textureArray;
-        std::cout << "Texture array " << i << " created with " << layersInThisArray << " layers." << std::endl;
-
-        // Create texture view
-        wgpu::TextureViewDescriptor viewDesc = {};
-        viewDesc.dimension = wgpu::TextureViewDimension::e2DArray;
-        textureViews_[i] = textureArray.CreateView(&viewDesc);
-        std::cout << "Texture view " << i << " created." << std::endl;
-
-        // Create bind group
-        wgpu::BindGroupEntry bgEntries[3] = {};
-        bgEntries[0].binding = 0;
-        bgEntries[0].buffer = uniformBuffer_;
-        bgEntries[0].offset = 0;
-        bgEntries[0].size = 16;
-
-        bgEntries[1].binding = 1;
-        bgEntries[1].textureView = textureViews_[i];
-
-        bgEntries[2].binding = 2;
-        bgEntries[2].sampler = sampler_;
-
-        wgpu::BindGroupDescriptor bgDesc = {};
-        bgDesc.layout = bindGroupLayout_;
-        bgDesc.entryCount = 3;
-        bgDesc.entries = bgEntries;
-
-        bindGroups_[i] = device_.CreateBindGroup(&bgDesc);
-        std::cout << "Bind group " << i << " created." << std::endl;
     }
-
 }
 
 // ImageFlasher destructor
@@ -282,18 +302,18 @@ void ImageFlasher::pushImage(const ImageData& image) {
     imageQueue_.push(image);
 }
 
-// Upload image to the texture array
-void ImageFlasher::uploadImage(const ImageData& image) {
+// Upload image to the texture array for a specific buffer
+void ImageFlasher::uploadImage(const ImageData& image, int buffer) {
     // Compute global layer index
-    uint32_t globalLayerIndex = writeIndex_;
+    uint32_t globalLayerIndex = writeIndex_[buffer];
     uint32_t textureArrayIndex = globalLayerIndex / maxLayersPerArray;
     uint32_t layerIndexInTexture = globalLayerIndex % maxLayersPerArray;
 
-    std::cout << "Uploading image to texture array " << textureArrayIndex << ", layer " << layerIndexInTexture << std::endl;
+    std::cout << "Buffer " << buffer << ": Uploading image to texture array " << textureArrayIndex << ", layer " << layerIndexInTexture << std::endl;
 
     // Upload the image to the texture array at the current indices
     wgpu::ImageCopyTexture dst = {};
-    dst.texture = textureArrays_[textureArrayIndex];
+    dst.texture = textureArrays_[buffer][textureArrayIndex];
     dst.mipLevel = 0;
     dst.origin = { 0, 0, layerIndexInTexture };
     dst.aspect = wgpu::TextureAspect::All;
@@ -309,11 +329,21 @@ void ImageFlasher::uploadImage(const ImageData& image) {
     extent.depthOrArrayLayers = 1;
 
     queue_.WriteTexture(&dst, image.pixels.data(), image.pixels.size(), &layout, &extent);
-    std::cout << "Image uploaded to GPU." << std::endl;
+    std::cout << "Buffer " << buffer << ": Image uploaded to GPU." << std::endl;
+
+    // Update write index
+    writeIndex_[buffer] = (writeIndex_[buffer] + 1) % ringBufferSize_;
+
+    // Update imagesInBuffer_ up to ringBufferSize_
+    if (imagesInBuffer_[buffer] < ringBufferSize_)
+        imagesInBuffer_[buffer]++;
 }
 
 // Update method to process and upload images, and update the display index
 void ImageFlasher::update() {
+    // Determine back buffer index
+    int backBuffer = 1 - bufferIndex_;
+
     // Process any new images
     while (true) {
         ImageData image;
@@ -321,37 +351,48 @@ void ImageFlasher::update() {
             break;
         }
 
-        // Upload image to the texture array
-        uploadImage(image);
-
-        // Update write index
-        writeIndex_ = (writeIndex_ + 1) % ringBufferSize_;
+        // Upload image to the back buffer
+        uploadImage(image, backBuffer);
     }
 
-    // Update display index
-    displayIndex_ = (displayIndex_ + 1) % ringBufferSize_;
+    // Update display index for the back buffer based on imageSwitchInterval_
+    auto now = std::chrono::steady_clock::now();
+    std::chrono::duration<float> elapsed = now - lastSwitchTime_[backBuffer];
 
-    // Compute global layer index
-    uint32_t globalLayerIndex = displayIndex_;
-    uint32_t layerIndexInTexture = globalLayerIndex % maxLayersPerArray;
+    if (elapsed.count() >= imageSwitchInterval_) {
+        displayIndex_[backBuffer] = (displayIndex_[backBuffer] + 1) % (imagesInBuffer_[backBuffer] > 0 ? imagesInBuffer_[backBuffer] : 1);
+        lastSwitchTime_[backBuffer] = now;
 
-    // Update uniform buffer with layer index within the texture array
-    struct UniformsData {
-        int32_t layerIndex;
-        int32_t padding[3]; // Padding to make up 16 bytes
-    };
-    UniformsData uniformsData = { static_cast<int32_t>(layerIndexInTexture), { 0, 0, 0 } };
-    queue_.WriteBuffer(uniformBuffer_, 0, &uniformsData, sizeof(UniformsData));
+        // Compute layer index within the texture array
+        uint32_t globalLayerIndex = displayIndex_[backBuffer];
+        uint32_t layerIndexInTexture = globalLayerIndex % maxLayersPerArray;
+
+        // Update uniform buffer with layer index within the texture array
+        struct UniformsData {
+            int32_t layerIndex;
+            int32_t padding[3]; // Padding to make up 16 bytes
+        };
+        UniformsData uniformsData = { static_cast<int32_t>(layerIndexInTexture), { 0, 0, 0 } };
+        queue_.WriteBuffer(uniformBuffers_[backBuffer], 0, &uniformsData, sizeof(UniformsData));
+    }
 }
 
-// Render method to set the bind group
+// Render method to set the bind group for the front buffer
 void ImageFlasher::render(wgpu::RenderPassEncoder& pass) {
+    // Compute which buffer is currently front
+    int frontBuffer = bufferIndex_;
+
     // Compute global layer index
-    uint32_t globalLayerIndex = displayIndex_;
+    uint32_t globalLayerIndex = displayIndex_[frontBuffer];
     uint32_t textureArrayIndex = globalLayerIndex / maxLayersPerArray;
 
     // Set the bind group corresponding to the correct texture array
-    pass.SetBindGroup(0, bindGroups_[textureArrayIndex]);
+    pass.SetBindGroup(0, bindGroups_[frontBuffer][textureArrayIndex]);
+}
+
+// Swap front and back buffers
+void ImageFlasher::swapBuffers() {
+    bufferIndex_ = 1 - bufferIndex_;
 }
 
 // Helper function to create shader modules with error checking
@@ -462,9 +503,11 @@ void initializeSwapChainAndPipeline(wgpu::Surface surface) {
         return;
     }
 
-    // Create ImageFlasher instance with updated ring buffer size
+    // Create ImageFlasher instance with double buffering
     constexpr uint32_t RING_BUFFER_SIZE = 1024; // Set your desired ring buffer size here
-    imageFlasher = new ImageFlasher(device, RING_BUFFER_SIZE);
+    constexpr float IMAGE_SWITCH_INTERVAL = 1.0f / 60.0f; // Time in seconds between image switches (e.g., ~60 FPS)
+    imageFlasher = new ImageFlasher(device, RING_BUFFER_SIZE, IMAGE_SWITCH_INTERVAL);
+
     std::cout << "ImageFlasher instance created." << std::endl;
 
     // Start image generation thread here
@@ -485,8 +528,8 @@ void initializeSwapChainAndPipeline(wgpu::Surface surface) {
             // Push the image to ImageFlasher
             imageFlasher->pushImage(image);
 
-            // Sleep for a while
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            // Sleep for a short duration to simulate image generation rate
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         std::cout << "Image generation thread exiting." << std::endl;
     });
@@ -581,6 +624,9 @@ EM_BOOL frame(double time, void* userData) {
 
     wgpu::CommandBuffer cmdBuffer = encoder.Finish();
     queue.Submit(1, &cmdBuffer);
+
+    // Swap buffers after rendering
+    imageFlasher->swapBuffers();
 
     // Continue the loop
     return EM_TRUE;
