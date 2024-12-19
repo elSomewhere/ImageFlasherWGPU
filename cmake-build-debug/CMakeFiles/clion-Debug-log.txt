@@ -1,0 +1,5 @@
+/Applications/CLion.app/Contents/bin/cmake/mac/aarch64/bin/cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_MAKE_PROGRAM=/Applications/CLion.app/Contents/bin/ninja/mac/aarch64/ninja -DCMAKE_TOOLCHAIN_FILE=/Users/estebanlanter/CLionProjects/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake -G Ninja -S /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU -B /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/cmake-build-debug
+-- Using toolchain file: /Users/estebanlanter/CLionProjects/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake
+-- Configuring done (0.8s)
+-- Generating done (0.0s)
+-- Build files have been written to: /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/cmake-build-debug
