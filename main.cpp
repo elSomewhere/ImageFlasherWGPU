@@ -17,6 +17,9 @@ void HandleUncapturedError(WGPUErrorType type, const char* message, void* userda
     emscripten_log(EM_LOG_ERROR, "Uncaptured WebGPU Error (%d): %s", static_cast<int>(type), message);
 }
 
+constexpr uint32_t RING_BUFFER_SIZE = 256; // Define the ring buffer size
+
+
 // Vertex Shader
 const char* vertexShaderCode = R"(
 struct VertexOut {
@@ -52,15 +55,17 @@ fn main(@builtin(vertex_index) VertexIndex : u32) -> VertexOut {
 // Fragment Shader - Solid Color for Testing
 const char* fragmentShaderCode = R"(
 struct Uniforms {
-    layerIndex : u32;
-};
+    layerIndex : u32
+}
 @group(0) @binding(0) var<uniform> uniforms : Uniforms;
 @group(0) @binding(1) var textureArray : texture_2d_array<f32>;
 @group(0) @binding(2) var sampler0 : sampler;
 
+const RING_BUFFER_SIZE : f32 = 256.0;
+
 @fragment
 fn main(@location(0) fragUV : vec2<f32>) -> @location(0) vec4<f32> {
-    let layer = f32(uniforms.layerIndex) / 1024.0;
+    let layer = f32(uniforms.layerIndex) / RING_BUFFER_SIZE;
     return vec4<f32>(layer, 0.0, 0.0, 1.0);
 }
 )";
@@ -434,7 +439,9 @@ void initializeSwapChainAndPipeline(wgpu::Surface surface) {
     }
 
     // Create ImageFlasher instance
-    imageFlasher = new ImageFlasher(device, 1024);
+    // Create ImageFlasher instance with corrected ring buffer size
+    imageFlasher = new ImageFlasher(device, RING_BUFFER_SIZE);
+//    std::cout << "ImageFlasher instance created." << std::endl;
     std::cout << "ImageFlasher instance created." << std::endl;
 
     // Start image generation thread here
