@@ -4696,6 +4696,512 @@ var _emscripten_get_now;
 
 _emscripten_get_now = () => performance.timeOrigin + performance.now();
 
+var reallyNegative = x => x < 0 || (x === 0 && (1 / x) === -Infinity);
+
+var convertI32PairToI53 = (lo, hi) => {
+ assert(hi === (hi | 0));
+ return (lo >>> 0) + hi * 4294967296;
+};
+
+var convertU32PairToI53 = (lo, hi) => (lo >>> 0) + (hi >>> 0) * 4294967296;
+
+var reSign = (value, bits) => {
+ if (value <= 0) {
+  return value;
+ }
+ var half = bits <= 32 ? Math.abs(1 << (bits - 1)) : Math.pow(2, bits - 1);
+ if (value >= half && (bits <= 32 || value > half)) {
+  value = -2 * half + value;
+ }
+ return value;
+};
+
+var strLen = ptr => {
+ var end = ptr;
+ while (GROWABLE_HEAP_U8()[end]) ++end;
+ return end - ptr;
+};
+
+var formatString = (format, varargs) => {
+ assert((varargs & 3) === 0);
+ var textIndex = format;
+ var argIndex = varargs;
+ function prepVararg(ptr, type) {
+  if (type === "double" || type === "i64") {
+   if (ptr & 7) {
+    assert((ptr & 7) === 4);
+    ptr += 4;
+   }
+  } else {
+   assert((ptr & 3) === 0);
+  }
+  return ptr;
+ }
+ function getNextArg(type) {
+  var ret;
+  argIndex = prepVararg(argIndex, type);
+  if (type === "double") {
+   ret = GROWABLE_HEAP_F64()[((argIndex) >> 3)];
+   argIndex += 8;
+  } else if (type == "i64") {
+   ret = [ GROWABLE_HEAP_I32()[((argIndex) >> 2)], GROWABLE_HEAP_I32()[(((argIndex) + (4)) >> 2)] ];
+   argIndex += 8;
+  } else {
+   assert((argIndex & 3) === 0);
+   type = "i32";
+   ret = GROWABLE_HEAP_I32()[((argIndex) >> 2)];
+   argIndex += 4;
+  }
+  return ret;
+ }
+ var ret = [];
+ var curr, next, currArg;
+ while (1) {
+  var startTextIndex = textIndex;
+  curr = GROWABLE_HEAP_I8()[((textIndex) >> 0)];
+  if (curr === 0) break;
+  next = GROWABLE_HEAP_I8()[((textIndex + 1) >> 0)];
+  if (curr == 37) {
+   var flagAlwaysSigned = false;
+   var flagLeftAlign = false;
+   var flagAlternative = false;
+   var flagZeroPad = false;
+   var flagPadSign = false;
+   flagsLoop: while (1) {
+    switch (next) {
+    case 43:
+     flagAlwaysSigned = true;
+     break;
+
+    case 45:
+     flagLeftAlign = true;
+     break;
+
+    case 35:
+     flagAlternative = true;
+     break;
+
+    case 48:
+     if (flagZeroPad) {
+      break flagsLoop;
+     } else {
+      flagZeroPad = true;
+      break;
+     }
+
+    case 32:
+     flagPadSign = true;
+     break;
+
+    default:
+     break flagsLoop;
+    }
+    textIndex++;
+    next = GROWABLE_HEAP_I8()[((textIndex + 1) >> 0)];
+   }
+   var width = 0;
+   if (next == 42) {
+    width = getNextArg("i32");
+    textIndex++;
+    next = GROWABLE_HEAP_I8()[((textIndex + 1) >> 0)];
+   } else {
+    while (next >= 48 && next <= 57) {
+     width = width * 10 + (next - 48);
+     textIndex++;
+     next = GROWABLE_HEAP_I8()[((textIndex + 1) >> 0)];
+    }
+   }
+   var precisionSet = false, precision = -1;
+   if (next == 46) {
+    precision = 0;
+    precisionSet = true;
+    textIndex++;
+    next = GROWABLE_HEAP_I8()[((textIndex + 1) >> 0)];
+    if (next == 42) {
+     precision = getNextArg("i32");
+     textIndex++;
+    } else {
+     while (1) {
+      var precisionChr = GROWABLE_HEAP_I8()[((textIndex + 1) >> 0)];
+      if (precisionChr < 48 || precisionChr > 57) break;
+      precision = precision * 10 + (precisionChr - 48);
+      textIndex++;
+     }
+    }
+    next = GROWABLE_HEAP_I8()[((textIndex + 1) >> 0)];
+   }
+   if (precision < 0) {
+    precision = 6;
+    precisionSet = false;
+   }
+   var argSize;
+   switch (String.fromCharCode(next)) {
+   case "h":
+    var nextNext = GROWABLE_HEAP_I8()[((textIndex + 2) >> 0)];
+    if (nextNext == 104) {
+     textIndex++;
+     argSize = 1;
+    } else {
+     argSize = 2;
+    }
+    break;
+
+   case "l":
+    var nextNext = GROWABLE_HEAP_I8()[((textIndex + 2) >> 0)];
+    if (nextNext == 108) {
+     textIndex++;
+     argSize = 8;
+    } else {
+     argSize = 4;
+    }
+    break;
+
+   case "L":
+   case "q":
+   case "j":
+    argSize = 8;
+    break;
+
+   case "z":
+   case "t":
+   case "I":
+    argSize = 4;
+    break;
+
+   default:
+    argSize = null;
+   }
+   if (argSize) textIndex++;
+   next = GROWABLE_HEAP_I8()[((textIndex + 1) >> 0)];
+   switch (String.fromCharCode(next)) {
+   case "d":
+   case "i":
+   case "u":
+   case "o":
+   case "x":
+   case "X":
+   case "p":
+    {
+     var signed = next == 100 || next == 105;
+     argSize = argSize || 4;
+     currArg = getNextArg("i" + (argSize * 8));
+     var argText;
+     if (argSize == 8) {
+      currArg = next == 117 ? convertU32PairToI53(currArg[0], currArg[1]) : convertI32PairToI53(currArg[0], currArg[1]);
+     }
+     if (argSize <= 4) {
+      var limit = Math.pow(256, argSize) - 1;
+      currArg = (signed ? reSign : unSign)(currArg & limit, argSize * 8);
+     }
+     var currAbsArg = Math.abs(currArg);
+     var prefix = "";
+     if (next == 100 || next == 105) {
+      argText = reSign(currArg, 8 * argSize).toString(10);
+     } else if (next == 117) {
+      argText = unSign(currArg, 8 * argSize).toString(10);
+      currArg = Math.abs(currArg);
+     } else if (next == 111) {
+      argText = (flagAlternative ? "0" : "") + currAbsArg.toString(8);
+     } else if (next == 120 || next == 88) {
+      prefix = (flagAlternative && currArg != 0) ? "0x" : "";
+      if (currArg < 0) {
+       currArg = -currArg;
+       argText = (currAbsArg - 1).toString(16);
+       var buffer = [];
+       for (var i = 0; i < argText.length; i++) {
+        buffer.push((15 - parseInt(argText[i], 16)).toString(16));
+       }
+       argText = buffer.join("");
+       while (argText.length < argSize * 2) argText = "f" + argText;
+      } else {
+       argText = currAbsArg.toString(16);
+      }
+      if (next == 88) {
+       prefix = prefix.toUpperCase();
+       argText = argText.toUpperCase();
+      }
+     } else if (next == 112) {
+      if (currAbsArg === 0) {
+       argText = "(nil)";
+      } else {
+       prefix = "0x";
+       argText = currAbsArg.toString(16);
+      }
+     }
+     if (precisionSet) {
+      while (argText.length < precision) {
+       argText = "0" + argText;
+      }
+     }
+     if (currArg >= 0) {
+      if (flagAlwaysSigned) {
+       prefix = "+" + prefix;
+      } else if (flagPadSign) {
+       prefix = " " + prefix;
+      }
+     }
+     if (argText.charAt(0) == "-") {
+      prefix = "-" + prefix;
+      argText = argText.substr(1);
+     }
+     while (prefix.length + argText.length < width) {
+      if (flagLeftAlign) {
+       argText += " ";
+      } else {
+       if (flagZeroPad) {
+        argText = "0" + argText;
+       } else {
+        prefix = " " + prefix;
+       }
+      }
+     }
+     argText = prefix + argText;
+     argText.split("").forEach(function(chr) {
+      ret.push(chr.charCodeAt(0));
+     });
+     break;
+    }
+
+   case "f":
+   case "F":
+   case "e":
+   case "E":
+   case "g":
+   case "G":
+    {
+     currArg = getNextArg("double");
+     var argText;
+     if (isNaN(currArg)) {
+      argText = "nan";
+      flagZeroPad = false;
+     } else if (!isFinite(currArg)) {
+      argText = (currArg < 0 ? "-" : "") + "inf";
+      flagZeroPad = false;
+     } else {
+      var isGeneral = false;
+      var effectivePrecision = Math.min(precision, 20);
+      if (next == 103 || next == 71) {
+       isGeneral = true;
+       precision = precision || 1;
+       var exponent = parseInt(currArg.toExponential(effectivePrecision).split("e")[1], 10);
+       if (precision > exponent && exponent >= -4) {
+        next = ((next == 103) ? "f" : "F").charCodeAt(0);
+        precision -= exponent + 1;
+       } else {
+        next = ((next == 103) ? "e" : "E").charCodeAt(0);
+        precision--;
+       }
+       effectivePrecision = Math.min(precision, 20);
+      }
+      if (next == 101 || next == 69) {
+       argText = currArg.toExponential(effectivePrecision);
+       if (/[eE][-+]\d$/.test(argText)) {
+        argText = argText.slice(0, -1) + "0" + argText.slice(-1);
+       }
+      } else if (next == 102 || next == 70) {
+       argText = currArg.toFixed(effectivePrecision);
+       if (currArg === 0 && reallyNegative(currArg)) {
+        argText = "-" + argText;
+       }
+      }
+      var parts = argText.split("e");
+      if (isGeneral && !flagAlternative) {
+       while (parts[0].length > 1 && parts[0].includes(".") && (parts[0].slice(-1) == "0" || parts[0].slice(-1) == ".")) {
+        parts[0] = parts[0].slice(0, -1);
+       }
+      } else {
+       if (flagAlternative && argText.indexOf(".") == -1) parts[0] += ".";
+       while (precision > effectivePrecision++) parts[0] += "0";
+      }
+      argText = parts[0] + (parts.length > 1 ? "e" + parts[1] : "");
+      if (next == 69) argText = argText.toUpperCase();
+      if (currArg >= 0) {
+       if (flagAlwaysSigned) {
+        argText = "+" + argText;
+       } else if (flagPadSign) {
+        argText = " " + argText;
+       }
+      }
+     }
+     while (argText.length < width) {
+      if (flagLeftAlign) {
+       argText += " ";
+      } else {
+       if (flagZeroPad && (argText[0] == "-" || argText[0] == "+")) {
+        argText = argText[0] + "0" + argText.slice(1);
+       } else {
+        argText = (flagZeroPad ? "0" : " ") + argText;
+       }
+      }
+     }
+     if (next < 97) argText = argText.toUpperCase();
+     argText.split("").forEach(function(chr) {
+      ret.push(chr.charCodeAt(0));
+     });
+     break;
+    }
+
+   case "s":
+    {
+     var arg = getNextArg("i8*");
+     var argLength = arg ? strLen(arg) : "(null)".length;
+     if (precisionSet) argLength = Math.min(argLength, precision);
+     if (!flagLeftAlign) {
+      while (argLength < width--) {
+       ret.push(32);
+      }
+     }
+     if (arg) {
+      for (var i = 0; i < argLength; i++) {
+       ret.push(GROWABLE_HEAP_U8()[((arg++) >> 0)]);
+      }
+     } else {
+      ret = ret.concat(intArrayFromString("(null)".substr(0, argLength), true));
+     }
+     if (flagLeftAlign) {
+      while (argLength < width--) {
+       ret.push(32);
+      }
+     }
+     break;
+    }
+
+   case "c":
+    {
+     if (flagLeftAlign) ret.push(getNextArg("i8"));
+     while (--width > 0) {
+      ret.push(32);
+     }
+     if (!flagLeftAlign) ret.push(getNextArg("i8"));
+     break;
+    }
+
+   case "n":
+    {
+     var ptr = getNextArg("i32*");
+     GROWABLE_HEAP_I32()[((ptr) >> 2)] = ret.length;
+     checkInt32(ret.length);
+     break;
+    }
+
+   case "%":
+    {
+     ret.push(curr);
+     break;
+    }
+
+   default:
+    {
+     for (var i = startTextIndex; i < textIndex + 2; i++) {
+      ret.push(GROWABLE_HEAP_I8()[((i) >> 0)]);
+     }
+    }
+   }
+   textIndex += 2;
+  } else {
+   ret.push(curr);
+   textIndex += 1;
+  }
+ }
+ return ret;
+};
+
+/** @param {number=} flags */ function getCallstack(flags) {
+ var callstack = jsStackTrace();
+ var iThisFunc = callstack.lastIndexOf("_emscripten_log");
+ var iThisFunc2 = callstack.lastIndexOf("_emscripten_get_callstack");
+ var iNextLine = callstack.indexOf("\n", Math.max(iThisFunc, iThisFunc2)) + 1;
+ callstack = callstack.slice(iNextLine);
+ if (flags & 8 && typeof emscripten_source_map == "undefined") {
+  warnOnce('Source map information is not available, emscripten_log with EM_LOG_C_STACK will be ignored. Build with "--pre-js $EMSCRIPTEN/src/emscripten-source-map.min.js" linker flag to add source map loading to code.');
+  flags ^= 8;
+  flags |= 16;
+ }
+ var lines = callstack.split("\n");
+ callstack = "";
+ var newFirefoxRe = new RegExp("\\s*(.*?)@(.*?):([0-9]+):([0-9]+)");
+ var firefoxRe = new RegExp("\\s*(.*?)@(.*):(.*)(:(.*))?");
+ var chromeRe = new RegExp("\\s*at (.*?) \\((.*):(.*):(.*)\\)");
+ for (var l in lines) {
+  var line = lines[l];
+  var symbolName = "";
+  var file = "";
+  var lineno = 0;
+  var column = 0;
+  var parts = chromeRe.exec(line);
+  if (parts && parts.length == 5) {
+   symbolName = parts[1];
+   file = parts[2];
+   lineno = parts[3];
+   column = parts[4];
+  } else {
+   parts = newFirefoxRe.exec(line);
+   if (!parts) parts = firefoxRe.exec(line);
+   if (parts && parts.length >= 4) {
+    symbolName = parts[1];
+    file = parts[2];
+    lineno = parts[3];
+    column = parts[4] | 0;
+   } else {
+    callstack += line + "\n";
+    continue;
+   }
+  }
+  var haveSourceMap = false;
+  if (flags & 8) {
+   var orig = emscripten_source_map.originalPositionFor({
+    line: lineno,
+    column: column
+   });
+   haveSourceMap = orig?.source;
+   if (haveSourceMap) {
+    if (flags & 64) {
+     orig.source = orig.source.substring(orig.source.replace(/\\/g, "/").lastIndexOf("/") + 1);
+    }
+    callstack += `    at ${symbolName} (${orig.source}:${orig.line}:${orig.column})\n`;
+   }
+  }
+  if ((flags & 16) || !haveSourceMap) {
+   if (flags & 64) {
+    file = file.substring(file.replace(/\\/g, "/").lastIndexOf("/") + 1);
+   }
+   callstack += (haveSourceMap ? (`     = ${symbolName}`) : (`    at ${symbolName}`)) + ` (${file}:${lineno}:${column})\n`;
+  }
+ }
+ callstack = callstack.replace(/\s+$/, "");
+ return callstack;
+}
+
+var emscriptenLog = (flags, str) => {
+ if (flags & 24) {
+  str = str.replace(/\s+$/, "");
+  str += (str.length > 0 ? "\n" : "") + getCallstack(flags);
+ }
+ if (flags & 1) {
+  if (flags & 4) {
+   console.error(str);
+  } else if (flags & 2) {
+   console.warn(str);
+  } else if (flags & 512) {
+   console.info(str);
+  } else if (flags & 256) {
+   console.debug(str);
+  } else {
+   console.log(str);
+  }
+ } else if (flags & 6) {
+  err(str);
+ } else {
+  out(str);
+ }
+};
+
+var _emscripten_log = (flags, format, varargs) => {
+ var result = formatString(format, varargs);
+ var str = UTF8ArrayToString(result, 0);
+ emscriptenLog(flags, str);
+};
+
 var _emscripten_request_animation_frame_loop = (cb, userData) => {
  function tick(timeStamp) {
   if (getWasmTableEntry(cb)(timeStamp, userData)) {
@@ -6047,10 +6553,26 @@ function _wgpuDeviceRelease(id) {
  return WebGPU.mgrDevice.release(id);
 }
 
+var _wgpuDeviceSetUncapturedErrorCallback = function(deviceId, callback, userdata) {
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(37, 1, deviceId, callback, userdata);
+ var device = WebGPU.mgrDevice.get(deviceId);
+ device["onuncapturederror"] = function(ev) {
+  callUserCallback(() => {
+   var Validation = 1;
+   var OutOfMemory = 2;
+   var type;
+   assert(typeof GPUValidationError != "undefined");
+   assert(typeof GPUOutOfMemoryError != "undefined");
+   if (ev.error instanceof GPUValidationError) type = Validation; else if (ev.error instanceof GPUOutOfMemoryError) type = OutOfMemory;
+   WebGPU.errorCallback(callback, type, ev.error.message, userdata);
+  });
+ };
+};
+
 var findCanvasEventTarget = target => findEventTarget(target);
 
 function _wgpuInstanceCreateSurface(instanceId, descriptor) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(37, 1, instanceId, descriptor);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(38, 1, instanceId, descriptor);
  assert(descriptor);
  assert(instanceId === 1, "WGPUInstance must be created by wgpuCreateInstance");
  var nextInChainPtr = GROWABLE_HEAP_U32()[((descriptor) >> 2)];
@@ -6071,7 +6593,7 @@ function _wgpuInstanceCreateSurface(instanceId, descriptor) {
 }
 
 function _wgpuInstanceRequestAdapter(instanceId, options, callback, userdata) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(38, 1, instanceId, options, callback, userdata);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(39, 1, instanceId, options, callback, userdata);
  assert(instanceId === 1, "WGPUInstance must be created by wgpuCreateInstance");
  var opts;
  if (options) {
@@ -6115,27 +6637,27 @@ function _wgpuInstanceRequestAdapter(instanceId, options, callback, userdata) {
 }
 
 function _wgpuPipelineLayoutReference(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(39, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(40, 1, id);
  return WebGPU.mgrPipelineLayout.reference(id);
 }
 
 function _wgpuPipelineLayoutRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(40, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(41, 1, id);
  return WebGPU.mgrPipelineLayout.release(id);
 }
 
 function _wgpuQuerySetRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(41, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(42, 1, id);
  return WebGPU.mgrQuerySet.release(id);
 }
 
 function _wgpuQueueRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(42, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(43, 1, id);
  return WebGPU.mgrQueue.release(id);
 }
 
 function _wgpuQueueSubmit(queueId, commandCount, commands) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(43, 1, queueId, commandCount, commands);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(44, 1, queueId, commandCount, commands);
  assert(commands % 4 === 0);
  var queue = WebGPU.mgrQueue.get(queueId);
  var cmds = Array.from(GROWABLE_HEAP_I32().subarray((commands) >> 2, (commands + commandCount * 4) >> 2), function(id) {
@@ -6145,7 +6667,7 @@ function _wgpuQueueSubmit(queueId, commandCount, commands) {
 }
 
 function _wgpuQueueWriteBuffer(queueId, bufferId, bufferOffset_low, bufferOffset_high, data, size) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(44, 1, queueId, bufferId, bufferOffset_low, bufferOffset_high, data, size);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(45, 1, queueId, bufferId, bufferOffset_low, bufferOffset_high, data, size);
  var bufferOffset = convertI32PairToI53Checked(bufferOffset_low, bufferOffset_high);
  var queue = WebGPU.mgrQueue.get(queueId);
  var buffer = WebGPU.mgrBuffer.get(bufferId);
@@ -6154,7 +6676,7 @@ function _wgpuQueueWriteBuffer(queueId, bufferId, bufferOffset_low, bufferOffset
 }
 
 function _wgpuQueueWriteTexture(queueId, destinationPtr, data, dataSize, dataLayoutPtr, writeSizePtr) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(45, 1, queueId, destinationPtr, data, dataSize, dataLayoutPtr, writeSizePtr);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(46, 1, queueId, destinationPtr, data, dataSize, dataLayoutPtr, writeSizePtr);
  var queue = WebGPU.mgrQueue.get(queueId);
  var destination = WebGPU.makeImageCopyTexture(destinationPtr);
  var dataLayout = WebGPU.makeTextureDataLayout(dataLayoutPtr);
@@ -6164,24 +6686,24 @@ function _wgpuQueueWriteTexture(queueId, destinationPtr, data, dataSize, dataLay
 }
 
 function _wgpuRenderPassEncoderDraw(passId, vertexCount, instanceCount, firstVertex, firstInstance) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(46, 1, passId, vertexCount, instanceCount, firstVertex, firstInstance);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(47, 1, passId, vertexCount, instanceCount, firstVertex, firstInstance);
  var pass = WebGPU.mgrRenderPassEncoder.get(passId);
  pass["draw"](vertexCount, instanceCount, firstVertex, firstInstance);
 }
 
 function _wgpuRenderPassEncoderEnd(encoderId) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(47, 1, encoderId);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(48, 1, encoderId);
  var encoder = WebGPU.mgrRenderPassEncoder.get(encoderId);
  encoder["end"]();
 }
 
 function _wgpuRenderPassEncoderRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(48, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(49, 1, id);
  return WebGPU.mgrRenderPassEncoder.release(id);
 }
 
 function _wgpuRenderPassEncoderSetBindGroup(passId, groupIndex, groupId, dynamicOffsetCount, dynamicOffsetsPtr) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(49, 1, passId, groupIndex, groupId, dynamicOffsetCount, dynamicOffsetsPtr);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(50, 1, passId, groupIndex, groupId, dynamicOffsetCount, dynamicOffsetsPtr);
  var pass = WebGPU.mgrRenderPassEncoder.get(passId);
  var group = WebGPU.mgrBindGroup.get(groupId);
  if (dynamicOffsetCount == 0) {
@@ -6196,55 +6718,55 @@ function _wgpuRenderPassEncoderSetBindGroup(passId, groupIndex, groupId, dynamic
 }
 
 function _wgpuRenderPassEncoderSetPipeline(passId, pipelineId) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(50, 1, passId, pipelineId);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(51, 1, passId, pipelineId);
  var pass = WebGPU.mgrRenderPassEncoder.get(passId);
  var pipeline = WebGPU.mgrRenderPipeline.get(pipelineId);
  pass["setPipeline"](pipeline);
 }
 
 function _wgpuRenderPipelineRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(51, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(52, 1, id);
  return WebGPU.mgrRenderPipeline.release(id);
 }
 
 function _wgpuSamplerReference(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(52, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(53, 1, id);
  return WebGPU.mgrSampler.reference(id);
 }
 
 function _wgpuSamplerRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(53, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(54, 1, id);
  return WebGPU.mgrSampler.release(id);
 }
 
 function _wgpuShaderModuleReference(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(54, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(55, 1, id);
  return WebGPU.mgrShaderModule.reference(id);
 }
 
 function _wgpuShaderModuleRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(55, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(56, 1, id);
  return WebGPU.mgrShaderModule.release(id);
 }
 
 function _wgpuSurfaceRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(56, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(57, 1, id);
  return WebGPU.mgrSurface.release(id);
 }
 
 function _wgpuSwapChainGetCurrentTextureView(swapChainId) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(57, 1, swapChainId);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(58, 1, swapChainId);
  var context = WebGPU.mgrSwapChain.get(swapChainId);
  return WebGPU.mgrTextureView.create(context["getCurrentTexture"]()["createView"]());
 }
 
 function _wgpuSwapChainRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(58, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(59, 1, id);
  return WebGPU.mgrSwapChain.release(id);
 }
 
 function _wgpuTextureCreateView(textureId, descriptor) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(59, 1, textureId, descriptor);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(60, 1, textureId, descriptor);
  var desc;
  if (descriptor) {
   assert(descriptor);
@@ -6268,22 +6790,22 @@ function _wgpuTextureCreateView(textureId, descriptor) {
 }
 
 function _wgpuTextureReference(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(60, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(61, 1, id);
  return WebGPU.mgrTexture.reference(id);
 }
 
 function _wgpuTextureRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(61, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(62, 1, id);
  return WebGPU.mgrTexture.release(id);
 }
 
 function _wgpuTextureViewReference(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(62, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(63, 1, id);
  return WebGPU.mgrTextureView.reference(id);
 }
 
 function _wgpuTextureViewRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(63, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(64, 1, id);
  return WebGPU.mgrTextureView.release(id);
 }
 
@@ -6345,7 +6867,7 @@ FS.staticInit();
 
 WebGPU.initManagers();
 
-var proxiedFunctionTable = [ _proc_exit, exitOnMainThread, pthreadCreateProxied, _emscripten_get_element_css_size, _environ_get, _environ_sizes_get, _fd_close, _fd_read, _fd_seek, _fd_write, _wgpuAdapterRelease, _wgpuAdapterRequestDevice, _wgpuBindGroupLayoutReference, _wgpuBindGroupLayoutRelease, _wgpuBindGroupReference, _wgpuBindGroupRelease, _wgpuBufferReference, _wgpuBufferRelease, _wgpuCommandBufferRelease, _wgpuCommandEncoderBeginRenderPass, _wgpuCommandEncoderFinish, _wgpuCommandEncoderRelease, _wgpuCreateInstance, _wgpuDeviceCreateBindGroup, _wgpuDeviceCreateBindGroupLayout, _wgpuDeviceCreateBuffer, _wgpuDeviceCreateCommandEncoder, _wgpuDeviceCreatePipelineLayout, _wgpuDeviceCreateRenderPipeline, generateRenderPipelineDesc, _wgpuDeviceCreateSampler, _wgpuDeviceCreateShaderModule, _wgpuDeviceCreateSwapChain, _wgpuDeviceCreateTexture, _wgpuDeviceGetQueue, _wgpuDeviceReference, _wgpuDeviceRelease, _wgpuInstanceCreateSurface, _wgpuInstanceRequestAdapter, _wgpuPipelineLayoutReference, _wgpuPipelineLayoutRelease, _wgpuQuerySetRelease, _wgpuQueueRelease, _wgpuQueueSubmit, _wgpuQueueWriteBuffer, _wgpuQueueWriteTexture, _wgpuRenderPassEncoderDraw, _wgpuRenderPassEncoderEnd, _wgpuRenderPassEncoderRelease, _wgpuRenderPassEncoderSetBindGroup, _wgpuRenderPassEncoderSetPipeline, _wgpuRenderPipelineRelease, _wgpuSamplerReference, _wgpuSamplerRelease, _wgpuShaderModuleReference, _wgpuShaderModuleRelease, _wgpuSurfaceRelease, _wgpuSwapChainGetCurrentTextureView, _wgpuSwapChainRelease, _wgpuTextureCreateView, _wgpuTextureReference, _wgpuTextureRelease, _wgpuTextureViewReference, _wgpuTextureViewRelease ];
+var proxiedFunctionTable = [ _proc_exit, exitOnMainThread, pthreadCreateProxied, _emscripten_get_element_css_size, _environ_get, _environ_sizes_get, _fd_close, _fd_read, _fd_seek, _fd_write, _wgpuAdapterRelease, _wgpuAdapterRequestDevice, _wgpuBindGroupLayoutReference, _wgpuBindGroupLayoutRelease, _wgpuBindGroupReference, _wgpuBindGroupRelease, _wgpuBufferReference, _wgpuBufferRelease, _wgpuCommandBufferRelease, _wgpuCommandEncoderBeginRenderPass, _wgpuCommandEncoderFinish, _wgpuCommandEncoderRelease, _wgpuCreateInstance, _wgpuDeviceCreateBindGroup, _wgpuDeviceCreateBindGroupLayout, _wgpuDeviceCreateBuffer, _wgpuDeviceCreateCommandEncoder, _wgpuDeviceCreatePipelineLayout, _wgpuDeviceCreateRenderPipeline, generateRenderPipelineDesc, _wgpuDeviceCreateSampler, _wgpuDeviceCreateShaderModule, _wgpuDeviceCreateSwapChain, _wgpuDeviceCreateTexture, _wgpuDeviceGetQueue, _wgpuDeviceReference, _wgpuDeviceRelease, _wgpuDeviceSetUncapturedErrorCallback, _wgpuInstanceCreateSurface, _wgpuInstanceRequestAdapter, _wgpuPipelineLayoutReference, _wgpuPipelineLayoutRelease, _wgpuQuerySetRelease, _wgpuQueueRelease, _wgpuQueueSubmit, _wgpuQueueWriteBuffer, _wgpuQueueWriteTexture, _wgpuRenderPassEncoderDraw, _wgpuRenderPassEncoderEnd, _wgpuRenderPassEncoderRelease, _wgpuRenderPassEncoderSetBindGroup, _wgpuRenderPassEncoderSetPipeline, _wgpuRenderPipelineRelease, _wgpuSamplerReference, _wgpuSamplerRelease, _wgpuShaderModuleReference, _wgpuShaderModuleRelease, _wgpuSurfaceRelease, _wgpuSwapChainGetCurrentTextureView, _wgpuSwapChainRelease, _wgpuTextureCreateView, _wgpuTextureReference, _wgpuTextureRelease, _wgpuTextureViewReference, _wgpuTextureViewRelease ];
 
 function checkIncomingModuleAPI() {
  ignoredModuleProp("fetchSettings");
@@ -6377,6 +6899,7 @@ var wasmImports = {
  /** @export */ emscripten_exit_with_live_runtime: _emscripten_exit_with_live_runtime,
  /** @export */ emscripten_get_element_css_size: _emscripten_get_element_css_size,
  /** @export */ emscripten_get_now: _emscripten_get_now,
+ /** @export */ emscripten_log: _emscripten_log,
  /** @export */ emscripten_request_animation_frame_loop: _emscripten_request_animation_frame_loop,
  /** @export */ emscripten_resize_heap: _emscripten_resize_heap,
  /** @export */ environ_get: _environ_get,
@@ -6438,6 +6961,7 @@ var wasmImports = {
  /** @export */ wgpuDeviceGetQueue: _wgpuDeviceGetQueue,
  /** @export */ wgpuDeviceReference: _wgpuDeviceReference,
  /** @export */ wgpuDeviceRelease: _wgpuDeviceRelease,
+ /** @export */ wgpuDeviceSetUncapturedErrorCallback: _wgpuDeviceSetUncapturedErrorCallback,
  /** @export */ wgpuInstanceCreateSurface: _wgpuInstanceCreateSurface,
  /** @export */ wgpuInstanceRequestAdapter: _wgpuInstanceRequestAdapter,
  /** @export */ wgpuPipelineLayoutReference: _wgpuPipelineLayoutReference,
@@ -6820,11 +7344,11 @@ Module["keepRuntimeAlive"] = keepRuntimeAlive;
 
 Module["ExitStatus"] = ExitStatus;
 
-var missingLibrarySymbols = [ "writeI53ToI64", "writeI53ToI64Clamped", "writeI53ToI64Signaling", "writeI53ToU64Clamped", "writeI53ToU64Signaling", "readI53FromU64", "convertI32PairToI53", "convertU32PairToI53", "ydayFromDate", "setErrNo", "inetPton4", "inetNtop4", "inetPton6", "inetNtop6", "readSockaddr", "writeSockaddr", "getHostByName", "getCallstack", "emscriptenLog", "convertPCtoSourceLocation", "readEmAsmArgs", "jstoi_q", "jstoi_s", "listenOnce", "autoResumeAudioContext", "dynCallLegacy", "getDynCaller", "dynCall", "asmjsMangle", "handleAllocatorInit", "HandleAllocator", "getNativeTypeSize", "STACK_SIZE", "STACK_ALIGN", "POINTER_SIZE", "ASSERTIONS", "getCFunc", "ccall", "cwrap", "uleb128Encode", "sigToWasmTypes", "generateFuncType", "convertJsFunctionToWasm", "getEmptyTableSlot", "updateTableMap", "getFunctionAddress", "addFunction", "removeFunction", "reallyNegative", "strLen", "reSign", "formatString", "intArrayToString", "AsciiToString", "UTF16ToString", "stringToUTF16", "lengthBytesUTF16", "UTF32ToString", "stringToUTF32", "lengthBytesUTF32", "stringToNewUTF8", "registerKeyEventCallback", "fillMouseEventData", "registerMouseEventCallback", "registerWheelEventCallback", "registerUiEventCallback", "registerFocusEventCallback", "fillDeviceOrientationEventData", "registerDeviceOrientationEventCallback", "fillDeviceMotionEventData", "registerDeviceMotionEventCallback", "screenOrientation", "fillOrientationChangeEventData", "registerOrientationChangeEventCallback", "fillFullscreenChangeEventData", "registerFullscreenChangeEventCallback", "JSEvents_requestFullscreen", "JSEvents_resizeCanvasForFullscreen", "registerRestoreOldStyle", "hideEverythingExceptGivenElement", "restoreHiddenElements", "setLetterbox", "softFullscreenResizeWebGLRenderTarget", "doRequestFullscreen", "fillPointerlockChangeEventData", "registerPointerlockChangeEventCallback", "registerPointerlockErrorEventCallback", "requestPointerLock", "fillVisibilityChangeEventData", "registerVisibilityChangeEventCallback", "registerTouchEventCallback", "fillGamepadEventData", "registerGamepadEventCallback", "disableGamepadApiIfItThrows", "registerBeforeUnloadEventCallback", "fillBatteryEventData", "battery", "registerBatteryEventCallback", "setCanvasElementSizeCallingThread", "setCanvasElementSizeMainThread", "setCanvasElementSize", "getCanvasSizeCallingThread", "getCanvasSizeMainThread", "getCanvasElementSize", "checkWasiClock", "wasiRightsToMuslOFlags", "wasiOFlagsToMuslOFlags", "createDyncallWrapper", "safeSetTimeout", "setImmediateWrapped", "clearImmediateWrapped", "polyfillSetImmediate", "getPromise", "makePromise", "idsToPromises", "makePromiseCallback", "Browser_asyncPrepareDataCounter", "setMainLoop", "getSocketFromFD", "getSocketAddress", "FS_unlink", "FS_mkdirTree", "_setNetworkCallback", "heapObjectForWebGLType", "heapAccessShiftForWebGLHeap", "webgl_enable_ANGLE_instanced_arrays", "webgl_enable_OES_vertex_array_object", "webgl_enable_WEBGL_draw_buffers", "webgl_enable_WEBGL_multi_draw", "emscriptenWebGLGet", "computeUnpackAlignedImageSize", "colorChannelsInGlTextureFormat", "emscriptenWebGLGetTexPixelData", "__glGenObject", "emscriptenWebGLGetUniform", "webglGetUniformLocation", "webglPrepareUniformLocationsBeforeFirstUse", "webglGetLeftBracePos", "emscriptenWebGLGetVertexAttrib", "__glGetActiveAttribOrUniform", "emscriptenWebGLGetBufferBinding", "emscriptenWebGLValidateMapBufferTarget", "writeGLArray", "emscripten_webgl_destroy_context_before_on_calling_thread", "registerWebGlEventCallback", "runAndAbortIfError", "SDL_unicode", "SDL_ttfContext", "SDL_audio", "GLFW_Window", "emscriptenWebGLGetIndexed", "webgl_enable_WEBGL_draw_instanced_base_vertex_base_instance", "webgl_enable_WEBGL_multi_draw_instanced_base_vertex_base_instance", "ALLOC_NORMAL", "ALLOC_STACK", "allocate", "writeStringToMemory", "writeAsciiToMemory" ];
+var missingLibrarySymbols = [ "writeI53ToI64", "writeI53ToI64Clamped", "writeI53ToI64Signaling", "writeI53ToU64Clamped", "writeI53ToU64Signaling", "readI53FromU64", "ydayFromDate", "setErrNo", "inetPton4", "inetNtop4", "inetPton6", "inetNtop6", "readSockaddr", "writeSockaddr", "getHostByName", "convertPCtoSourceLocation", "readEmAsmArgs", "jstoi_q", "jstoi_s", "listenOnce", "autoResumeAudioContext", "dynCallLegacy", "getDynCaller", "dynCall", "asmjsMangle", "handleAllocatorInit", "HandleAllocator", "getNativeTypeSize", "STACK_SIZE", "STACK_ALIGN", "POINTER_SIZE", "ASSERTIONS", "getCFunc", "ccall", "cwrap", "uleb128Encode", "sigToWasmTypes", "generateFuncType", "convertJsFunctionToWasm", "getEmptyTableSlot", "updateTableMap", "getFunctionAddress", "addFunction", "removeFunction", "intArrayToString", "AsciiToString", "UTF16ToString", "stringToUTF16", "lengthBytesUTF16", "UTF32ToString", "stringToUTF32", "lengthBytesUTF32", "stringToNewUTF8", "registerKeyEventCallback", "fillMouseEventData", "registerMouseEventCallback", "registerWheelEventCallback", "registerUiEventCallback", "registerFocusEventCallback", "fillDeviceOrientationEventData", "registerDeviceOrientationEventCallback", "fillDeviceMotionEventData", "registerDeviceMotionEventCallback", "screenOrientation", "fillOrientationChangeEventData", "registerOrientationChangeEventCallback", "fillFullscreenChangeEventData", "registerFullscreenChangeEventCallback", "JSEvents_requestFullscreen", "JSEvents_resizeCanvasForFullscreen", "registerRestoreOldStyle", "hideEverythingExceptGivenElement", "restoreHiddenElements", "setLetterbox", "softFullscreenResizeWebGLRenderTarget", "doRequestFullscreen", "fillPointerlockChangeEventData", "registerPointerlockChangeEventCallback", "registerPointerlockErrorEventCallback", "requestPointerLock", "fillVisibilityChangeEventData", "registerVisibilityChangeEventCallback", "registerTouchEventCallback", "fillGamepadEventData", "registerGamepadEventCallback", "disableGamepadApiIfItThrows", "registerBeforeUnloadEventCallback", "fillBatteryEventData", "battery", "registerBatteryEventCallback", "setCanvasElementSizeCallingThread", "setCanvasElementSizeMainThread", "setCanvasElementSize", "getCanvasSizeCallingThread", "getCanvasSizeMainThread", "getCanvasElementSize", "checkWasiClock", "wasiRightsToMuslOFlags", "wasiOFlagsToMuslOFlags", "createDyncallWrapper", "safeSetTimeout", "setImmediateWrapped", "clearImmediateWrapped", "polyfillSetImmediate", "getPromise", "makePromise", "idsToPromises", "makePromiseCallback", "Browser_asyncPrepareDataCounter", "setMainLoop", "getSocketFromFD", "getSocketAddress", "FS_unlink", "FS_mkdirTree", "_setNetworkCallback", "heapObjectForWebGLType", "heapAccessShiftForWebGLHeap", "webgl_enable_ANGLE_instanced_arrays", "webgl_enable_OES_vertex_array_object", "webgl_enable_WEBGL_draw_buffers", "webgl_enable_WEBGL_multi_draw", "emscriptenWebGLGet", "computeUnpackAlignedImageSize", "colorChannelsInGlTextureFormat", "emscriptenWebGLGetTexPixelData", "__glGenObject", "emscriptenWebGLGetUniform", "webglGetUniformLocation", "webglPrepareUniformLocationsBeforeFirstUse", "webglGetLeftBracePos", "emscriptenWebGLGetVertexAttrib", "__glGetActiveAttribOrUniform", "emscriptenWebGLGetBufferBinding", "emscriptenWebGLValidateMapBufferTarget", "writeGLArray", "emscripten_webgl_destroy_context_before_on_calling_thread", "registerWebGlEventCallback", "runAndAbortIfError", "SDL_unicode", "SDL_ttfContext", "SDL_audio", "emscriptenWebGLGetIndexed", "webgl_enable_WEBGL_draw_instanced_base_vertex_base_instance", "webgl_enable_WEBGL_multi_draw_instanced_base_vertex_base_instance", "ALLOC_NORMAL", "ALLOC_STACK", "allocate", "writeStringToMemory", "writeAsciiToMemory" ];
 
 missingLibrarySymbols.forEach(missingLibrarySymbol);
 
-var unexportedSymbols = [ "run", "addOnPreRun", "addOnInit", "addOnPreMain", "addOnExit", "addOnPostRun", "addRunDependency", "removeRunDependency", "FS_createFolder", "FS_createPath", "FS_createLazyFile", "FS_createLink", "FS_createDevice", "FS_readFile", "out", "err", "callMain", "abort", "wasmExports", "stackAlloc", "stackSave", "stackRestore", "getTempRet0", "setTempRet0", "GROWABLE_HEAP_I8", "GROWABLE_HEAP_U8", "GROWABLE_HEAP_I16", "GROWABLE_HEAP_U16", "GROWABLE_HEAP_I32", "GROWABLE_HEAP_U32", "GROWABLE_HEAP_F32", "GROWABLE_HEAP_F64", "writeStackCookie", "checkStackCookie", "readI53FromI64", "convertI32PairToI53Checked", "ptrToString", "zeroMemory", "exitJS", "getHeapMax", "growMemory", "ENV", "setStackLimits", "MONTH_DAYS_REGULAR", "MONTH_DAYS_LEAP", "MONTH_DAYS_REGULAR_CUMULATIVE", "MONTH_DAYS_LEAP_CUMULATIVE", "isLeapYear", "arraySum", "addDays", "ERRNO_CODES", "ERRNO_MESSAGES", "DNS", "Protocols", "Sockets", "initRandomFill", "randomFill", "timers", "warnOnce", "UNWIND_CACHE", "readEmAsmArgsArray", "getExecutableName", "handleException", "runtimeKeepalivePush", "runtimeKeepalivePop", "callUserCallback", "maybeExit", "asyncLoad", "alignMemory", "mmapAlloc", "wasmTable", "noExitRuntime", "freeTableIndexes", "functionsInTableMap", "unSign", "setValue", "getValue", "PATH", "PATH_FS", "UTF8Decoder", "UTF8ArrayToString", "UTF8ToString", "stringToUTF8Array", "stringToUTF8", "lengthBytesUTF8", "intArrayFromString", "stringToAscii", "UTF16Decoder", "stringToUTF8OnStack", "writeArrayToMemory", "JSEvents", "specialHTMLTargets", "maybeCStringToJsString", "findEventTarget", "findCanvasEventTarget", "getBoundingClientRect", "currentFullscreenStrategy", "restoreOldWindowedStyle", "demangle", "demangleAll", "jsStackTrace", "stackTrace", "getEnvStrings", "doReadv", "doWritev", "promiseMap", "uncaughtExceptionCount", "exceptionLast", "exceptionCaught", "ExceptionInfo", "findMatchingCatch", "getExceptionMessageCommon", "incrementExceptionRefcount", "decrementExceptionRefcount", "getExceptionMessage", "Browser", "wget", "SYSCALLS", "preloadPlugins", "FS_createPreloadedFile", "FS_modeStringToFlags", "FS_getMode", "FS_stdin_getChar_buffer", "FS_stdin_getChar", "FS", "FS_createDataFile", "MEMFS", "TTY", "PIPEFS", "SOCKFS", "tempFixedLengthArray", "miniTempWebGLFloatBuffers", "miniTempWebGLIntBuffers", "GL", "emscripten_webgl_power_preferences", "AL", "GLUT", "EGL", "GLEW", "IDBStore", "SDL", "SDL_gfx", "GLFW", "WebGPU", "JsValStore", "allocateUTF8", "allocateUTF8OnStack", "PThread", "terminateWorker", "killThread", "cleanupThread", "registerTLSInit", "cancelThread", "spawnThread", "exitOnMainThread", "proxyToMainThread", "proxiedJSCallArgs", "invokeEntryPoint", "checkMailbox" ];
+var unexportedSymbols = [ "run", "addOnPreRun", "addOnInit", "addOnPreMain", "addOnExit", "addOnPostRun", "addRunDependency", "removeRunDependency", "FS_createFolder", "FS_createPath", "FS_createLazyFile", "FS_createLink", "FS_createDevice", "FS_readFile", "out", "err", "callMain", "abort", "wasmExports", "stackAlloc", "stackSave", "stackRestore", "getTempRet0", "setTempRet0", "GROWABLE_HEAP_I8", "GROWABLE_HEAP_U8", "GROWABLE_HEAP_I16", "GROWABLE_HEAP_U16", "GROWABLE_HEAP_I32", "GROWABLE_HEAP_U32", "GROWABLE_HEAP_F32", "GROWABLE_HEAP_F64", "writeStackCookie", "checkStackCookie", "readI53FromI64", "convertI32PairToI53", "convertI32PairToI53Checked", "convertU32PairToI53", "ptrToString", "zeroMemory", "exitJS", "getHeapMax", "growMemory", "ENV", "setStackLimits", "MONTH_DAYS_REGULAR", "MONTH_DAYS_LEAP", "MONTH_DAYS_REGULAR_CUMULATIVE", "MONTH_DAYS_LEAP_CUMULATIVE", "isLeapYear", "arraySum", "addDays", "ERRNO_CODES", "ERRNO_MESSAGES", "DNS", "Protocols", "Sockets", "initRandomFill", "randomFill", "timers", "warnOnce", "getCallstack", "emscriptenLog", "UNWIND_CACHE", "readEmAsmArgsArray", "getExecutableName", "handleException", "runtimeKeepalivePush", "runtimeKeepalivePop", "callUserCallback", "maybeExit", "asyncLoad", "alignMemory", "mmapAlloc", "wasmTable", "noExitRuntime", "freeTableIndexes", "functionsInTableMap", "reallyNegative", "unSign", "strLen", "reSign", "formatString", "setValue", "getValue", "PATH", "PATH_FS", "UTF8Decoder", "UTF8ArrayToString", "UTF8ToString", "stringToUTF8Array", "stringToUTF8", "lengthBytesUTF8", "intArrayFromString", "stringToAscii", "UTF16Decoder", "stringToUTF8OnStack", "writeArrayToMemory", "JSEvents", "specialHTMLTargets", "maybeCStringToJsString", "findEventTarget", "findCanvasEventTarget", "getBoundingClientRect", "currentFullscreenStrategy", "restoreOldWindowedStyle", "demangle", "demangleAll", "jsStackTrace", "stackTrace", "getEnvStrings", "doReadv", "doWritev", "promiseMap", "uncaughtExceptionCount", "exceptionLast", "exceptionCaught", "ExceptionInfo", "findMatchingCatch", "getExceptionMessageCommon", "incrementExceptionRefcount", "decrementExceptionRefcount", "getExceptionMessage", "Browser", "wget", "SYSCALLS", "preloadPlugins", "FS_createPreloadedFile", "FS_modeStringToFlags", "FS_getMode", "FS_stdin_getChar_buffer", "FS_stdin_getChar", "FS", "FS_createDataFile", "MEMFS", "TTY", "PIPEFS", "SOCKFS", "tempFixedLengthArray", "miniTempWebGLFloatBuffers", "miniTempWebGLIntBuffers", "GL", "emscripten_webgl_power_preferences", "AL", "GLUT", "EGL", "GLEW", "IDBStore", "SDL", "SDL_gfx", "WebGPU", "JsValStore", "allocateUTF8", "allocateUTF8OnStack", "PThread", "terminateWorker", "killThread", "cleanupThread", "registerTLSInit", "cancelThread", "spawnThread", "exitOnMainThread", "proxyToMainThread", "proxiedJSCallArgs", "invokeEntryPoint", "checkMailbox" ];
 
 unexportedSymbols.forEach(unexportedRuntimeSymbol);
 

@@ -147,27 +147,7 @@
 			},
 			{
 				"backtrace" : 2,
-				"fragment" : "USE_GLFW=3",
-				"role" : "flags"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "-s",
-				"role" : "flags"
-			},
-			{
-				"backtrace" : 2,
 				"fragment" : "USE_WEBGPU=1",
-				"role" : "flags"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "-s",
-				"role" : "flags"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "USE_WEBGL2=1",
 				"role" : "flags"
 			},
 			{
@@ -248,16 +228,6 @@
 			{
 				"backtrace" : 2,
 				"fragment" : "DISABLE_EXCEPTION_CATCHING=0",
-				"role" : "flags"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "-s",
-				"role" : "flags"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "USE_BOOST_HEADERS=1",
 				"role" : "flags"
 			},
 			{

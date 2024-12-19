@@ -66,7 +66,7 @@ build CMakeFiles/index.dir/main.cpp.o: CXX_COMPILER__index_unscanned_Release /Us
 
 build index.js: CXX_EXECUTABLE_LINKER__index_Release CMakeFiles/index.dir/main.cpp.o
   FLAGS = -O3 -DNDEBUG
-  LINK_FLAGS = -s USE_GLFW=3 -s USE_WEBGPU=1 -s USE_WEBGL2=1 -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 -s NO_EXIT_RUNTIME=0 -s ASSERTIONS=2 -s SAFE_HEAP=1 -s STACK_OVERFLOW_CHECK=2 -s DEMANGLE_SUPPORT=1 -s DISABLE_EXCEPTION_CATCHING=0 -s USE_BOOST_HEADERS=1 -pthread -s PTHREAD_POOL_SIZE=10 -s FULL_ES3=1 -gsource-map --source-map-base http://localhost:8000/ --no-heap-copy
+  LINK_FLAGS = -s USE_WEBGPU=1 -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 -s NO_EXIT_RUNTIME=0 -s ASSERTIONS=2 -s SAFE_HEAP=1 -s STACK_OVERFLOW_CHECK=2 -s DEMANGLE_SUPPORT=1 -s DISABLE_EXCEPTION_CATCHING=0 -pthread -s PTHREAD_POOL_SIZE=10 -s FULL_ES3=1 -gsource-map --source-map-base http://localhost:8000/ --no-heap-copy
   OBJECT_DIR = CMakeFiles/index.dir
   POST_BUILD = :
   PRE_LINK = :

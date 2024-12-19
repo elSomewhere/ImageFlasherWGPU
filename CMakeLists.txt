@@ -34,9 +34,9 @@ target_compile_options(index
 
 # Set linker flags for Emscripten
 target_link_options(index PRIVATE
-        "SHELL:-s USE_GLFW=3"
+#        "SHELL:-s USE_GLFW=3"
         "SHELL:-s USE_WEBGPU=1"
-        "SHELL:-s USE_WEBGL2=1"
+#        "SHELL:-s USE_WEBGL2=1"
         "SHELL:-s WASM=1"
         "SHELL:-s ALLOW_MEMORY_GROWTH=1"
         "SHELL:-s NO_EXIT_RUNTIME=0"
@@ -48,7 +48,7 @@ target_link_options(index PRIVATE
 
         "SHELL:-s DISABLE_EXCEPTION_CATCHING=0"
 
-        "SHELL:-s USE_BOOST_HEADERS=1"
+#        "SHELL:-s USE_BOOST_HEADERS=1"
         -pthread
         "SHELL:-s PTHREAD_POOL_SIZE=10"
         "SHELL:-s FULL_ES3=1"
