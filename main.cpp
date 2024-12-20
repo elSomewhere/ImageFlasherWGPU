@@ -9,6 +9,7 @@
 #include <condition_variable>
 #include <array>
 #include <chrono>
+#include <cstdlib>
 
 #include <emscripten.h>
 #include <emscripten/html5.h> // For emscripten_request_animation_frame_loop
@@ -122,7 +123,7 @@ private:
 std::atomic<bool> imageGenRunning(false);
 std::thread imageGenThread;
 
-// ImageFlasher class definition with Double Buffering
+// ImageFlasher class definition with Double Buffering and Time-based switching
 class ImageFlasher {
 public:
     ImageFlasher(wgpu::Device device, uint32_t ringBufferSize, float imageSwitchInterval);
@@ -137,8 +138,7 @@ public:
 
 private:
     void uploadImage(const ImageData& image, int buffer);
-    float imageSwitchInterval_; // Time in seconds between image switches
-    std::chrono::steady_clock::time_point lastSwitchTime_[2];
+
     static const uint32_t maxLayersPerArray = 256;
 
     wgpu::Device device_;
@@ -147,16 +147,21 @@ private:
     uint32_t ringBufferSize_;
     uint32_t textureWidth_ = 512;
     uint32_t textureHeight_ = 512;
+
+    // Each buffer (0 or 1) has its own ring state
     uint32_t writeIndex_[2];
     uint32_t displayIndex_[2];
     uint32_t imagesInBuffer_[2];
+
+    // For time-based switching
+    float imageSwitchInterval_;
+    std::chrono::steady_clock::time_point lastSwitchTime_[2];
 
     wgpu::Sampler sampler_;
     std::array<wgpu::Buffer, 2> uniformBuffers_;
     wgpu::PipelineLayout pipelineLayout_;
     wgpu::BindGroupLayout bindGroupLayout_;
 
-    // Double Buffered Resources
     std::array<std::vector<wgpu::Texture>, 2> textureArrays_;
     std::array<std::vector<wgpu::TextureView>, 2> textureViews_;
     std::array<std::vector<wgpu::BindGroup>, 2> bindGroups_;
@@ -166,14 +171,13 @@ private:
     int bufferIndex_; // 0 or 1
 };
 
-// ImageFlasher constructor with Double Buffering
 ImageFlasher::ImageFlasher(wgpu::Device device, uint32_t ringBufferSize, float imageSwitchInterval)
         : device_(device),
           queue_(device.GetQueue()),
           ringBufferSize_(ringBufferSize),
           bufferIndex_(0),
           imageSwitchInterval_(imageSwitchInterval) {
-    std::cout << "Initializing ImageFlasher with ring buffer size: " << ringBufferSize_ << std::endl;
+    std::cout << "Initializing ImageFlasher with ring buffer size: " << ringBufferSize_ << " and interval: " << imageSwitchInterval_ << std::endl;
 
     // Initialize buffer indices and counters
     for (int b = 0; b < 2; ++b) {
@@ -187,14 +191,13 @@ ImageFlasher::ImageFlasher(wgpu::Device device, uint32_t ringBufferSize, float i
     uint32_t numTextureArrays = (ringBufferSize_ + maxLayersPerArray - 1) / maxLayersPerArray;
     std::cout << "Number of texture arrays: " << numTextureArrays << std::endl;
 
-    // Resize texture arrays, views, and bind groups for both buffers
     for (int b = 0; b < 2; ++b) {
         textureArrays_[b].resize(numTextureArrays);
         textureViews_[b].resize(numTextureArrays);
         bindGroups_[b].resize(numTextureArrays);
     }
 
-    // Create sampler (shared between buffers)
+    // Create sampler
     wgpu::SamplerDescriptor samplerDesc = {};
     samplerDesc.addressModeU = wgpu::AddressMode::ClampToEdge;
     samplerDesc.addressModeV = wgpu::AddressMode::ClampToEdge;
@@ -203,7 +206,6 @@ ImageFlasher::ImageFlasher(wgpu::Device device, uint32_t ringBufferSize, float i
     sampler_ = device_.CreateSampler(&samplerDesc);
     std::cout << "Sampler created." << std::endl;
 
-    // Create bind group layout (shared between buffers)
     wgpu::BindGroupLayoutEntry bglEntries[3] = {};
     bglEntries[0].binding = 0;
     bglEntries[0].visibility = wgpu::ShaderStage::Fragment;
@@ -227,30 +229,25 @@ ImageFlasher::ImageFlasher(wgpu::Device device, uint32_t ringBufferSize, float i
     bindGroupLayout_ = device_.CreateBindGroupLayout(&bglDesc);
     std::cout << "Bind group layout created." << std::endl;
 
-    // Create pipeline layout (shared between buffers)
     wgpu::PipelineLayoutDescriptor plDesc = {};
     plDesc.bindGroupLayoutCount = 1;
     plDesc.bindGroupLayouts = &bindGroupLayout_;
     pipelineLayout_ = device_.CreatePipelineLayout(&plDesc);
     std::cout << "Pipeline layout created." << std::endl;
 
-    // Initialize resources for both buffers
     for (int b = 0; b < 2; ++b) {
-        // Create uniform buffer for each buffer
         wgpu::BufferDescriptor uniformBufferDesc = {};
         uniformBufferDesc.size = 16;
         uniformBufferDesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
         uniformBuffers_[b] = device_.CreateBuffer(&uniformBufferDesc);
         std::cout << "Uniform buffer " << b << " created." << std::endl;
 
-        // Create texture arrays, texture views, and bind groups for each buffer
         for (uint32_t i = 0; i < numTextureArrays; ++i) {
             uint32_t layersInThisArray = maxLayersPerArray;
             if (i == numTextureArrays -1 && (ringBufferSize_ % maxLayersPerArray != 0)) {
                 layersInThisArray = ringBufferSize_ % maxLayersPerArray;
             }
 
-            // Create texture array
             wgpu::TextureDescriptor textureDesc = {};
             textureDesc.size.width = textureWidth_;
             textureDesc.size.height = textureHeight_;
@@ -261,13 +258,11 @@ ImageFlasher::ImageFlasher(wgpu::Device device, uint32_t ringBufferSize, float i
             textureArrays_[b][i] = textureArray;
             std::cout << "Buffer " << b << ": Texture array " << i << " created with " << layersInThisArray << " layers." << std::endl;
 
-            // Create texture view
             wgpu::TextureViewDescriptor viewDesc = {};
             viewDesc.dimension = wgpu::TextureViewDimension::e2DArray;
             textureViews_[b][i] = textureArray.CreateView(&viewDesc);
             std::cout << "Buffer " << b << ": Texture view " << i << " created." << std::endl;
 
-            // Create bind group
             wgpu::BindGroupEntry bgEntries[3] = {};
             bgEntries[0].binding = 0;
             bgEntries[0].buffer = uniformBuffers_[b];
@@ -291,27 +286,29 @@ ImageFlasher::ImageFlasher(wgpu::Device device, uint32_t ringBufferSize, float i
     }
 }
 
-// ImageFlasher destructor
 ImageFlasher::~ImageFlasher() {
-    // Destructor (empty)
     std::cout << "ImageFlasher destroyed." << std::endl;
 }
 
-// Push image to the queue
 void ImageFlasher::pushImage(const ImageData& image) {
     imageQueue_.push(image);
 }
 
-// Upload image to the texture array for a specific buffer
+// Upload image to the texture array for a specific buffer (FIFO logic)
 void ImageFlasher::uploadImage(const ImageData& image, int buffer) {
-    // Compute global layer index
+    // If ring buffer full, discard oldest by incrementing displayIndex_
+    if (imagesInBuffer_[buffer] == ringBufferSize_) {
+        displayIndex_[buffer] = (displayIndex_[buffer] + 1) % ringBufferSize_;
+    } else {
+        imagesInBuffer_[buffer]++;
+    }
+
     uint32_t globalLayerIndex = writeIndex_[buffer];
     uint32_t textureArrayIndex = globalLayerIndex / maxLayersPerArray;
     uint32_t layerIndexInTexture = globalLayerIndex % maxLayersPerArray;
 
     std::cout << "Buffer " << buffer << ": Uploading image to texture array " << textureArrayIndex << ", layer " << layerIndexInTexture << std::endl;
 
-    // Upload the image to the texture array at the current indices
     wgpu::ImageCopyTexture dst = {};
     dst.texture = textureArrays_[buffer][textureArrayIndex];
     dst.mipLevel = 0;
@@ -331,68 +328,90 @@ void ImageFlasher::uploadImage(const ImageData& image, int buffer) {
     queue_.WriteTexture(&dst, image.pixels.data(), image.pixels.size(), &layout, &extent);
     std::cout << "Buffer " << buffer << ": Image uploaded to GPU." << std::endl;
 
-    // Update write index
+    // Update writeIndex_
     writeIndex_[buffer] = (writeIndex_[buffer] + 1) % ringBufferSize_;
-
-    // Update imagesInBuffer_ up to ringBufferSize_
-    if (imagesInBuffer_[buffer] < ringBufferSize_)
-        imagesInBuffer_[buffer]++;
 }
 
-// Update method to process and upload images, and update the display index
+// Update method:
+// - Process new images (upload to back buffer)
+// - If images were uploaded, swap buffers
+// - Advance display index of front buffer based on imageSwitchInterval_
 void ImageFlasher::update() {
-    // Determine back buffer index
-    int backBuffer = 1 - bufferIndex_;
+    int frontBuffer = bufferIndex_;
+    int backBuffer = 1 - frontBuffer;
 
-    // Process any new images
+    bool uploadedAnyImage = false;
+    // Process all new images for this frame
     while (true) {
         ImageData image;
         if (!imageQueue_.tryPop(image)) {
             break;
         }
-
-        // Upload image to the back buffer
         uploadImage(image, backBuffer);
+        uploadedAnyImage = true;
     }
 
-    // Update display index for the back buffer based on imageSwitchInterval_
-    auto now = std::chrono::steady_clock::now();
-    std::chrono::duration<float> elapsed = now - lastSwitchTime_[backBuffer];
+    // If images were uploaded, swap buffers so new images become visible next time
+    if (uploadedAnyImage) {
+        swapBuffers();
+        frontBuffer = bufferIndex_;
+    }
 
-    if (elapsed.count() >= imageSwitchInterval_) {
-        displayIndex_[backBuffer] = (displayIndex_[backBuffer] + 1) % (imagesInBuffer_[backBuffer] > 0 ? imagesInBuffer_[backBuffer] : 1);
-        lastSwitchTime_[backBuffer] = now;
+    // Handle time-based switching on the front buffer
+    // Only advance if we have at least one image
+    if (imagesInBuffer_[frontBuffer] > 0) {
+        auto now = std::chrono::steady_clock::now();
+        std::chrono::duration<float> elapsed = now - lastSwitchTime_[frontBuffer];
+        if (elapsed.count() >= imageSwitchInterval_) {
+            // Advance display index
+            displayIndex_[frontBuffer] = (displayIndex_[frontBuffer] + 1) % imagesInBuffer_[frontBuffer];
+            lastSwitchTime_[frontBuffer] = now;
 
-        // Compute layer index within the texture array
-        uint32_t globalLayerIndex = displayIndex_[backBuffer];
-        uint32_t layerIndexInTexture = globalLayerIndex % maxLayersPerArray;
+            // Update uniform buffer
+            uint32_t globalLayerIndex = displayIndex_[frontBuffer];
+            uint32_t layerIndexInTexture = globalLayerIndex % maxLayersPerArray;
 
-        // Update uniform buffer with layer index within the texture array
-        struct UniformsData {
-            int32_t layerIndex;
-            int32_t padding[3]; // Padding to make up 16 bytes
-        };
-        UniformsData uniformsData = { static_cast<int32_t>(layerIndexInTexture), { 0, 0, 0 } };
-        queue_.WriteBuffer(uniformBuffers_[backBuffer], 0, &uniformsData, sizeof(UniformsData));
+            struct UniformsData {
+                int32_t layerIndex;
+                int32_t padding[3];
+            };
+            UniformsData uniformsData = { static_cast<int32_t>(layerIndexInTexture), {0,0,0} };
+            queue_.WriteBuffer(uniformBuffers_[frontBuffer], 0, &uniformsData, sizeof(UniformsData));
+        }
     }
 }
 
-// Render method to set the bind group for the front buffer
 void ImageFlasher::render(wgpu::RenderPassEncoder& pass) {
-    // Compute which buffer is currently front
     int frontBuffer = bufferIndex_;
 
-    // Compute global layer index
-    uint32_t globalLayerIndex = displayIndex_[frontBuffer];
-    uint32_t textureArrayIndex = globalLayerIndex / maxLayersPerArray;
+    if (imagesInBuffer_[frontBuffer] == 0) {
+        // No images, just bind the first bind group to avoid errors (blank)
+        pass.SetBindGroup(0, bindGroups_[frontBuffer][0]);
+        return;
+    }
 
-    // Set the bind group corresponding to the correct texture array
+    uint32_t globalLayerIndex = displayIndex_[frontBuffer] % ringBufferSize_;
+    uint32_t textureArrayIndex = globalLayerIndex / maxLayersPerArray;
     pass.SetBindGroup(0, bindGroups_[frontBuffer][textureArrayIndex]);
 }
 
-// Swap front and back buffers
 void ImageFlasher::swapBuffers() {
     bufferIndex_ = 1 - bufferIndex_;
+    // Reset the lastSwitchTime_ for the new front buffer to ensure timing remains consistent.
+    lastSwitchTime_[bufferIndex_] = std::chrono::steady_clock::now();
+
+    // Also update the uniform buffer for the newly front buffer to ensure correct image is displayed immediately
+    if (imagesInBuffer_[bufferIndex_] > 0) {
+        uint32_t globalLayerIndex = displayIndex_[bufferIndex_];
+        uint32_t layerIndexInTexture = globalLayerIndex % maxLayersPerArray;
+
+        struct UniformsData {
+            int32_t layerIndex;
+            int32_t padding[3];
+        };
+        UniformsData uniformsData = { static_cast<int32_t>(layerIndexInTexture), {0,0,0} };
+        queue_.WriteBuffer(uniformBuffers_[bufferIndex_], 0, &uniformsData, sizeof(UniformsData));
+    }
 }
 
 // Helper function to create shader modules with error checking
@@ -427,20 +446,17 @@ void createRenderPipeline() {
         return;
     }
 
-    // Use the bind group layout from ImageFlasher
     wgpu::PipelineLayout pipelineLayout = imageFlasher->getPipelineLayout();
 
     wgpu::RenderPipelineDescriptor desc = {};
 
-    // Vertex state
     desc.vertex.module = vsModule;
     desc.vertex.entryPoint = "main";
     desc.vertex.bufferCount = 0;
     desc.vertex.buffers = nullptr;
 
-    // Fragment state
     wgpu::ColorTargetState colorTarget = {};
-    colorTarget.format = swapChainFormat; // Use swapChainFormat variable
+    colorTarget.format = swapChainFormat;
 
     wgpu::FragmentState fragmentState = {};
     fragmentState.module = fsModule;
@@ -449,10 +465,7 @@ void createRenderPipeline() {
     fragmentState.targets = &colorTarget;
 
     desc.fragment = &fragmentState;
-
-    // Other states
-    desc.layout = pipelineLayout; // Use the pipeline layout from ImageFlasher
-
+    desc.layout = pipelineLayout;
     desc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
     desc.primitive.stripIndexFormat = wgpu::IndexFormat::Undefined;
     desc.primitive.frontFace = wgpu::FrontFace::CCW;
@@ -470,19 +483,16 @@ void createRenderPipeline() {
     }
 }
 
-// Function to initialize the swap chain and pipeline
 void initializeSwapChainAndPipeline(wgpu::Surface surface) {
     std::cout << "Initializing swap chain and pipeline." << std::endl;
 
-    // Create swap chain
     wgpu::SwapChainDescriptor swapChainDesc = {};
-    swapChainDesc.format = wgpu::TextureFormat::BGRA8Unorm; // Ensure this matches pipeline
+    swapChainDesc.format = wgpu::TextureFormat::BGRA8Unorm;
     swapChainDesc.usage = wgpu::TextureUsage::RenderAttachment;
     swapChainDesc.presentMode = wgpu::PresentMode::Fifo;
 
     swapChainFormat = swapChainDesc.format;
 
-    // Get canvas size
     double canvasWidth, canvasHeight;
     emscripten_get_element_css_size("canvas", &canvasWidth, &canvasHeight);
     std::cout << "Canvas size: " << canvasWidth << "x" << canvasHeight << std::endl;
@@ -503,14 +513,14 @@ void initializeSwapChainAndPipeline(wgpu::Surface surface) {
         return;
     }
 
-    // Create ImageFlasher instance with double buffering
-    constexpr uint32_t RING_BUFFER_SIZE = 1024; // Set your desired ring buffer size here
-    constexpr float IMAGE_SWITCH_INTERVAL = 1.0f / 60.0f; // Time in seconds between image switches (e.g., ~60 FPS)
+    // Create ImageFlasher instance with double buffering and interval
+    constexpr uint32_t RING_BUFFER_SIZE = 1024;
+    constexpr float IMAGE_SWITCH_INTERVAL = 1.0f / 60.0f; // switch images ~60 times per second
     imageFlasher = new ImageFlasher(device, RING_BUFFER_SIZE, IMAGE_SWITCH_INTERVAL);
-
     std::cout << "ImageFlasher instance created." << std::endl;
 
-    // Start image generation thread here
+    // Start image generation thread
+    // Start image generation thread
     imageGenRunning = true;
     imageGenThread = std::thread([]() {
         std::cout << "Image generation thread started." << std::endl;
@@ -520,22 +530,58 @@ void initializeSwapChainAndPipeline(wgpu::Surface surface) {
             image.height = 512;
             image.pixels.resize(image.width * image.height * 4);
 
-            // Fill with random data
-            for (size_t i = 0; i < image.pixels.size(); ++i) {
-                image.pixels[i] = rand() % 256;
+            // Create a gradient from blue to green horizontally
+            for (uint32_t y = 0; y < image.height; ++y) {
+                for (uint32_t x = 0; x < image.width; ++x) {
+                    float t = float(x) / float(image.width - 1);
+                    uint8_t r = 0;
+                    uint8_t g = (uint8_t)(255 * t);
+                    uint8_t b = (uint8_t)(255 * (1.0f - t));
+                    uint8_t a = 255;
+
+                    size_t idx = (y * image.width + x) * 4;
+                    image.pixels[idx + 0] = r;
+                    image.pixels[idx + 1] = g;
+                    image.pixels[idx + 2] = b;
+                    image.pixels[idx + 3] = a;
+                }
             }
 
-            // Push the image to ImageFlasher
-            imageFlasher->pushImage(image);
+            // Draw a few random circles
+            int numCircles = 5;
+            for (int c = 0; c < numCircles; ++c) {
+                int cx = rand() % image.width;
+                int cy = rand() % image.height;
+                int radius = (rand() % 50) + 10;
+                uint8_t cr = rand() % 256;
+                uint8_t cg = rand() % 256;
+                uint8_t cb = rand() % 256;
+                uint8_t ca = 255;
 
-            // Sleep for a short duration to simulate image generation rate
+                for (int y = -radius; y <= radius; ++y) {
+                    for (int x = -radius; x <= radius; ++x) {
+                        int nx = cx + x;
+                        int ny = cy + y;
+                        if (nx >= 0 && nx < (int)image.width && ny >= 0 && ny < (int)image.height) {
+                            if (x*x + y*y <= radius*radius) {
+                                size_t idx = (ny * image.width + nx) * 4;
+                                image.pixels[idx + 0] = cr;
+                                image.pixels[idx + 1] = cg;
+                                image.pixels[idx + 2] = cb;
+                                image.pixels[idx + 3] = ca;
+                            }
+                        }
+                    }
+                }
+            }
+
+            imageFlasher->pushImage(image);
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         std::cout << "Image generation thread exiting." << std::endl;
     });
     std::cout << "Image generation thread started." << std::endl;
 
-    // Create pipeline
     createRenderPipeline();
     std::cout << "Render pipeline created." << std::endl;
 
@@ -555,7 +601,6 @@ void onDeviceRequestEnded(WGPURequestDeviceStatus status,
 
         device.SetUncapturedErrorCallback(HandleUncapturedError, nullptr);
 
-        // Now that we have the device, initialize swap chain and pipeline
         WGPUSurface surface = static_cast<WGPUSurface>(userdata);
         initializeSwapChainAndPipeline(wgpu::Surface::Acquire(surface));
 
@@ -573,7 +618,6 @@ void onAdapterRequestEnded(WGPURequestAdapterStatus status,
         wgpu::Adapter adapter = wgpu::Adapter::Acquire(cAdapter);
         std::cout << "WebGPU adapter acquired." << std::endl;
 
-        // Request device
         wgpu::DeviceDescriptor deviceDesc = {};
         deviceDesc.label = "My Device";
 
@@ -585,7 +629,6 @@ void onAdapterRequestEnded(WGPURequestAdapterStatus status,
 
 // Frame callback
 EM_BOOL frame(double time, void* userData) {
-    // Ensure swap chain is valid
     if (!swapChain) {
         std::cerr << "Swap chain not initialized." << std::endl;
         return EM_FALSE;
@@ -597,7 +640,7 @@ EM_BOOL frame(double time, void* userData) {
         return EM_FALSE;
     }
 
-    // Call imageFlasher->update()
+    // Update the imageFlasher (this processes new images and advances displayIndex_ based on time)
     imageFlasher->update();
 
     wgpu::CommandEncoder encoder = device.CreateCommandEncoder();
@@ -606,29 +649,23 @@ EM_BOOL frame(double time, void* userData) {
     colorAttachment.view = backbuffer;
     colorAttachment.loadOp = wgpu::LoadOp::Clear;
     colorAttachment.storeOp = wgpu::StoreOp::Store;
-    colorAttachment.clearValue = { 0.3f, 0.3f, 0.3f, 1.0f }; // Gray background
+    colorAttachment.clearValue = { 0.3f, 0.3f, 0.3f, 1.0f };
 
     wgpu::RenderPassDescriptor renderPassDesc = {};
     renderPassDesc.colorAttachmentCount = 1;
     renderPassDesc.colorAttachments = &colorAttachment;
 
     wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&renderPassDesc);
-
     pass.SetPipeline(pipeline);
-
-    // Let imageFlasher handle setting the bind group
     imageFlasher->render(pass);
-
     pass.Draw(6, 1, 0, 0);
     pass.End();
 
     wgpu::CommandBuffer cmdBuffer = encoder.Finish();
     queue.Submit(1, &cmdBuffer);
 
-    // Swap buffers after rendering
-    imageFlasher->swapBuffers();
+//    swapChain.Present();
 
-    // Continue the loop
     return EM_TRUE;
 }
 
@@ -649,19 +686,16 @@ void cleanup() {
 int main() {
     std::cout << "Starting application." << std::endl;
 
-    // Create a WGPUInstance
     WGPUInstanceDescriptor instanceDesc = {};
     WGPUInstance instance = wgpuCreateInstance(&instanceDesc);
     std::cout << "WebGPU instance created." << std::endl;
 
-    // Get the default WebGPU adapter
     WGPURequestAdapterOptions adapterOpts = {};
     adapterOpts.powerPreference = WGPUPowerPreference_HighPerformance;
 
-    // Create surface from canvas
     WGPUSurfaceDescriptorFromCanvasHTMLSelector canvDesc = {};
     canvDesc.chain.sType = WGPUSType_SurfaceDescriptorFromCanvasHTMLSelector;
-    canvDesc.selector = "canvas"; // Ensure your HTML has a <canvas id="canvas"></canvas>
+    canvDesc.selector = "canvas";
 
     WGPUSurfaceDescriptor surfDesc = {};
     surfDesc.nextInChain = reinterpret_cast<const WGPUChainedStruct*>(&canvDesc);
@@ -675,15 +709,13 @@ int main() {
     surfaceGlobal = wgpu::Surface::Acquire(surface);
     std::cout << "WebGPU surface created." << std::endl;
 
-    // Request adapter
     wgpuInstanceRequestAdapter(
             instance,
             &adapterOpts,
             onAdapterRequestEnded,
-            surface // Pass the surface as userdata
+            surface
     );
 
-    // Keep the runtime alive without blocking the main thread
     emscripten_exit_with_live_runtime();
 
     return 0;
