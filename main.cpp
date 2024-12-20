@@ -10,12 +10,22 @@
 #include <array>
 #include <chrono>
 #include <cstdlib>
+#include <filesystem>  // C++17 needed
+#include <set>
+#include <deque>
 
 #include <emscripten.h>
 #include <emscripten/html5.h> // For emscripten_request_animation_frame_loop
 #include <emscripten/html5_webgpu.h>
 
 #include <webgpu/webgpu_cpp.h>
+
+// Include stb_image and stb_image_resize for loading and resizing PNG images
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+#define STB_IMAGE_RESIZE_IMPLEMENTATION
+#include "stb_image_resize.h"
 
 // Error handler function
 void HandleUncapturedError(WGPUErrorType type, const char* message, void* userdata) {
@@ -179,7 +189,6 @@ ImageFlasher::ImageFlasher(wgpu::Device device, uint32_t ringBufferSize, float i
           imageSwitchInterval_(imageSwitchInterval) {
     std::cout << "Initializing ImageFlasher with ring buffer size: " << ringBufferSize_ << " and interval: " << imageSwitchInterval_ << std::endl;
 
-    // Initialize buffer indices and counters
     for (int b = 0; b < 2; ++b) {
         writeIndex_[b] = 0;
         displayIndex_[b] = 0;
@@ -187,7 +196,6 @@ ImageFlasher::ImageFlasher(wgpu::Device device, uint32_t ringBufferSize, float i
         lastSwitchTime_[b] = std::chrono::steady_clock::now();
     }
 
-    // Compute number of texture arrays needed
     uint32_t numTextureArrays = (ringBufferSize_ + maxLayersPerArray - 1) / maxLayersPerArray;
     std::cout << "Number of texture arrays: " << numTextureArrays << std::endl;
 
@@ -197,7 +205,6 @@ ImageFlasher::ImageFlasher(wgpu::Device device, uint32_t ringBufferSize, float i
         bindGroups_[b].resize(numTextureArrays);
     }
 
-    // Create sampler
     wgpu::SamplerDescriptor samplerDesc = {};
     samplerDesc.addressModeU = wgpu::AddressMode::ClampToEdge;
     samplerDesc.addressModeV = wgpu::AddressMode::ClampToEdge;
@@ -294,9 +301,7 @@ void ImageFlasher::pushImage(const ImageData& image) {
     imageQueue_.push(image);
 }
 
-// Upload image to the texture array for a specific buffer (FIFO logic)
 void ImageFlasher::uploadImage(const ImageData& image, int buffer) {
-    // If ring buffer full, discard oldest by incrementing displayIndex_
     if (imagesInBuffer_[buffer] == ringBufferSize_) {
         displayIndex_[buffer] = (displayIndex_[buffer] + 1) % ringBufferSize_;
     } else {
@@ -328,20 +333,14 @@ void ImageFlasher::uploadImage(const ImageData& image, int buffer) {
     queue_.WriteTexture(&dst, image.pixels.data(), image.pixels.size(), &layout, &extent);
     std::cout << "Buffer " << buffer << ": Image uploaded to GPU." << std::endl;
 
-    // Update writeIndex_
     writeIndex_[buffer] = (writeIndex_[buffer] + 1) % ringBufferSize_;
 }
 
-// Update method:
-// - Process new images (upload to back buffer)
-// - If images were uploaded, swap buffers
-// - Advance display index of front buffer based on imageSwitchInterval_
 void ImageFlasher::update() {
     int frontBuffer = bufferIndex_;
     int backBuffer = 1 - frontBuffer;
 
     bool uploadedAnyImage = false;
-    // Process all new images for this frame
     while (true) {
         ImageData image;
         if (!imageQueue_.tryPop(image)) {
@@ -351,23 +350,18 @@ void ImageFlasher::update() {
         uploadedAnyImage = true;
     }
 
-    // If images were uploaded, swap buffers so new images become visible next time
     if (uploadedAnyImage) {
         swapBuffers();
         frontBuffer = bufferIndex_;
     }
 
-    // Handle time-based switching on the front buffer
-    // Only advance if we have at least one image
     if (imagesInBuffer_[frontBuffer] > 0) {
         auto now = std::chrono::steady_clock::now();
         std::chrono::duration<float> elapsed = now - lastSwitchTime_[frontBuffer];
         if (elapsed.count() >= imageSwitchInterval_) {
-            // Advance display index
             displayIndex_[frontBuffer] = (displayIndex_[frontBuffer] + 1) % imagesInBuffer_[frontBuffer];
             lastSwitchTime_[frontBuffer] = now;
 
-            // Update uniform buffer
             uint32_t globalLayerIndex = displayIndex_[frontBuffer];
             uint32_t layerIndexInTexture = globalLayerIndex % maxLayersPerArray;
 
@@ -385,7 +379,6 @@ void ImageFlasher::render(wgpu::RenderPassEncoder& pass) {
     int frontBuffer = bufferIndex_;
 
     if (imagesInBuffer_[frontBuffer] == 0) {
-        // No images, just bind the first bind group to avoid errors (blank)
         pass.SetBindGroup(0, bindGroups_[frontBuffer][0]);
         return;
     }
@@ -397,10 +390,8 @@ void ImageFlasher::render(wgpu::RenderPassEncoder& pass) {
 
 void ImageFlasher::swapBuffers() {
     bufferIndex_ = 1 - bufferIndex_;
-    // Reset the lastSwitchTime_ for the new front buffer to ensure timing remains consistent.
     lastSwitchTime_[bufferIndex_] = std::chrono::steady_clock::now();
 
-    // Also update the uniform buffer for the newly front buffer to ensure correct image is displayed immediately
     if (imagesInBuffer_[bufferIndex_] > 0) {
         uint32_t globalLayerIndex = displayIndex_[bufferIndex_];
         uint32_t layerIndexInTexture = globalLayerIndex % maxLayersPerArray;
@@ -483,6 +474,146 @@ void createRenderPipeline() {
     }
 }
 
+// New class: ImageLoader
+// This class scans a given folder for PNG images. It keeps track of which images it has loaded,
+// so it won't load them more than once. If it finds new images, it loads them, resizes them to 512x512,
+// and pushes them into the ImageFlasher via pushImageCallback. It also maintains a FIFO buffer of loaded filenames
+// so that it doesn't grow unbounded. If the folder changes, newly added images will appear.
+
+class ImageLoader {
+public:
+    ImageLoader(const std::string& folderPath,
+                std::function<void(const ImageData&)> pushImageCallback,
+                size_t maxLoadedImages);
+    ~ImageLoader();
+
+private:
+    void run();
+    bool loadAndResizeImage(const std::string& filePath, ImageData& imageOut);
+
+    std::string folderPath_;
+    std::function<void(const ImageData&)> pushImageCallback_;
+    size_t maxLoadedImages_;
+
+    std::atomic<bool> running_;
+    std::thread thread_;
+
+    // To track which images have been loaded
+    // We'll use a deque for FIFO and a set for quick lookup
+    std::deque<std::string> loadedImagesQueue_;
+    std::set<std::string> loadedImagesSet_;
+    std::mutex loadedImagesMutex_;
+};
+
+ImageLoader::ImageLoader(const std::string& folderPath,
+                         std::function<void(const ImageData&)> pushImageCallback,
+                         size_t maxLoadedImages)
+        : folderPath_(folderPath),
+          pushImageCallback_(pushImageCallback),
+          maxLoadedImages_(maxLoadedImages),
+          running_(true) {
+    thread_ = std::thread(&ImageLoader::run, this);
+}
+
+ImageLoader::~ImageLoader() {
+    running_ = false;
+    if (thread_.joinable()) {
+        thread_.join();
+    }
+}
+
+void ImageLoader::run() {
+    std::cout << "ImageLoader thread started, monitoring folder: " << folderPath_ << std::endl;
+
+    while (running_) {
+        try {
+            // Scan folder for PNG files
+            for (auto& entry : std::filesystem::directory_iterator(folderPath_)) {
+                if (!running_) break;
+                if (entry.is_regular_file()) {
+                    auto path = entry.path();
+                    if (path.extension() == ".png") {
+                        std::string filename = path.string();
+
+                        // Check if we've already loaded this image
+                        {
+                            std::lock_guard<std::mutex> lock(loadedImagesMutex_);
+                            if (loadedImagesSet_.find(filename) != loadedImagesSet_.end()) {
+                                // Already loaded
+                                continue;
+                            }
+                        }
+
+                        // Load and resize image
+                        ImageData imgData;
+                        if (loadAndResizeImage(filename, imgData)) {
+                            // Push image to ImageFlasher
+                            pushImageCallback_(imgData);
+
+                            // Add to loadedImagesSet_ and loadedImagesQueue_ (FIFO)
+                            {
+                                std::lock_guard<std::mutex> lock(loadedImagesMutex_);
+                                loadedImagesQueue_.push_back(filename);
+                                loadedImagesSet_.insert(filename);
+
+                                // If we exceed maxLoadedImages_, pop oldest
+                                while (loadedImagesQueue_.size() > maxLoadedImages_) {
+                                    std::string oldest = loadedImagesQueue_.front();
+                                    loadedImagesQueue_.pop_front();
+                                    loadedImagesSet_.erase(oldest);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (std::exception& e) {
+            std::cerr << "Exception scanning folder: " << e.what() << std::endl;
+        }
+
+        // Sleep for a short duration before rescanning
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+
+    std::cout << "ImageLoader thread exiting." << std::endl;
+}
+
+bool ImageLoader::loadAndResizeImage(const std::string& filePath, ImageData& imageOut) {
+    // Load image using stb_image
+    int x, y, n;
+    unsigned char* data = stbi_load(filePath.c_str(), &x, &y, &n, 4); // force RGBA
+    if (!data) {
+        std::cerr << "Failed to load image: " << filePath << std::endl;
+        return false;
+    }
+
+    // We must resize to 512x512
+    const int desiredWidth = 512;
+    const int desiredHeight = 512;
+    std::vector<unsigned char> resized(desiredWidth * desiredHeight * 4);
+
+    int result = stbir_resize_uint8(data, x, y, 0,
+                                    resized.data(), desiredWidth, desiredHeight, 0,
+                                    4); // channels = 4 (RGBA)
+    stbi_image_free(data);
+    if (!result) {
+        std::cerr << "Failed to resize image: " << filePath << std::endl;
+        return false;
+    }
+
+    imageOut.width = desiredWidth;
+    imageOut.height = desiredHeight;
+    imageOut.pixels = std::move(resized);
+
+    std::cout << "Loaded and resized image: " << filePath << std::endl;
+    return true;
+}
+
+
+std::unique_ptr<ImageLoader> imageLoader;
+
+// We remove procedural generation and use ImageLoader now. The rest remains the same.
+
 void initializeSwapChainAndPipeline(wgpu::Surface surface) {
     std::cout << "Initializing swap chain and pipeline." << std::endl;
 
@@ -513,74 +644,19 @@ void initializeSwapChainAndPipeline(wgpu::Surface surface) {
         return;
     }
 
-    // Create ImageFlasher instance with double buffering and interval
     constexpr uint32_t RING_BUFFER_SIZE = 1024;
-    constexpr float IMAGE_SWITCH_INTERVAL = 1.0f / 60.0f; // switch images ~60 times per second
+    constexpr float IMAGE_SWITCH_INTERVAL = 1.0f / 60.0f; // ~60 times per second
     imageFlasher = new ImageFlasher(device, RING_BUFFER_SIZE, IMAGE_SWITCH_INTERVAL);
     std::cout << "ImageFlasher instance created." << std::endl;
 
-    // Start image generation thread
-    // Start image generation thread
-    imageGenRunning = true;
-    imageGenThread = std::thread([]() {
-        std::cout << "Image generation thread started." << std::endl;
-        while (imageGenRunning) {
-            ImageData image;
-            image.width = 512;
-            image.height = 512;
-            image.pixels.resize(image.width * image.height * 4);
-
-            // Create a gradient from blue to green horizontally
-            for (uint32_t y = 0; y < image.height; ++y) {
-                for (uint32_t x = 0; x < image.width; ++x) {
-                    float t = float(x) / float(image.width - 1);
-                    uint8_t r = 0;
-                    uint8_t g = (uint8_t)(255 * t);
-                    uint8_t b = (uint8_t)(255 * (1.0f - t));
-                    uint8_t a = 255;
-
-                    size_t idx = (y * image.width + x) * 4;
-                    image.pixels[idx + 0] = r;
-                    image.pixels[idx + 1] = g;
-                    image.pixels[idx + 2] = b;
-                    image.pixels[idx + 3] = a;
-                }
-            }
-
-            // Draw a few random circles
-            int numCircles = 5;
-            for (int c = 0; c < numCircles; ++c) {
-                int cx = rand() % image.width;
-                int cy = rand() % image.height;
-                int radius = (rand() % 50) + 10;
-                uint8_t cr = rand() % 256;
-                uint8_t cg = rand() % 256;
-                uint8_t cb = rand() % 256;
-                uint8_t ca = 255;
-
-                for (int y = -radius; y <= radius; ++y) {
-                    for (int x = -radius; x <= radius; ++x) {
-                        int nx = cx + x;
-                        int ny = cy + y;
-                        if (nx >= 0 && nx < (int)image.width && ny >= 0 && ny < (int)image.height) {
-                            if (x*x + y*y <= radius*radius) {
-                                size_t idx = (ny * image.width + nx) * 4;
-                                image.pixels[idx + 0] = cr;
-                                image.pixels[idx + 1] = cg;
-                                image.pixels[idx + 2] = cb;
-                                image.pixels[idx + 3] = ca;
-                            }
-                        }
-                    }
-                }
-            }
-
-            imageFlasher->pushImage(image);
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        }
-        std::cout << "Image generation thread exiting." << std::endl;
-    });
-    std::cout << "Image generation thread started." << std::endl;
+    // Instead of imageGenThread, we now create our ImageLoader
+    // Let's assume the folder path is "./images"
+    // We'll monitor this folder for new PNG images
+    // We'll have a maxLoadedImages to limit how many unique images we remember having loaded
+    size_t YOUR_MAX_LOADED_IMAGES = 100; // for example
+    imageLoader = std::make_unique<ImageLoader>("./images",
+                                                [](const ImageData& img){ imageFlasher->pushImage(img); },
+                                                YOUR_MAX_LOADED_IMAGES);
 
     createRenderPipeline();
     std::cout << "Render pipeline created." << std::endl;
@@ -603,7 +679,6 @@ void onDeviceRequestEnded(WGPURequestDeviceStatus status,
 
         WGPUSurface surface = static_cast<WGPUSurface>(userdata);
         initializeSwapChainAndPipeline(wgpu::Surface::Acquire(surface));
-
     } else {
         std::cerr << "Failed to create device: " << (message ? message : "Unknown error") << std::endl;
     }
@@ -640,7 +715,6 @@ EM_BOOL frame(double time, void* userData) {
         return EM_FALSE;
     }
 
-    // Update the imageFlasher (this processes new images and advances displayIndex_ based on time)
     imageFlasher->update();
 
     wgpu::CommandEncoder encoder = device.CreateCommandEncoder();
@@ -664,19 +738,19 @@ EM_BOOL frame(double time, void* userData) {
     wgpu::CommandBuffer cmdBuffer = encoder.Finish();
     queue.Submit(1, &cmdBuffer);
 
-//    swapChain.Present();
-
+    // Do not call swapChain.Present(); it's handled implicitly by the browser with requestAnimationFrame
     return EM_TRUE;
 }
 
 // Cleanup function
 void cleanup() {
     std::cout << "Cleaning up resources." << std::endl;
-    imageGenRunning = false;
-    if (imageGenThread.joinable()) {
-        imageGenThread.join();
-        std::cout << "Image generation thread joined." << std::endl;
-    }
+    // imageGenRunning = false; // Not used now since we replaced image generation with ImageLoader
+    // if (imageGenThread.joinable()) {
+    //     imageGenThread.join();
+    //     std::cout << "Image generation thread joined." << std::endl;
+    // }
+    imageLoader.reset();
     delete imageFlasher;
     imageFlasher = nullptr;
     std::cout << "ImageFlasher deleted." << std::endl;

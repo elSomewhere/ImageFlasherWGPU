@@ -13,6 +13,8 @@ include_directories(extern/glm EXCLUDE_FROM_ALL)
 # Set the source files
 set(SOURCES
         main.cpp
+        stb_image.h
+        stb_image_resize.h
 )
 
 # Add the executable
@@ -34,6 +36,8 @@ target_compile_options(index
 
 # Set linker flags for Emscripten
 target_link_options(index PRIVATE
+        "SHELL:-s FORCE_FILESYSTEM=1"
+        "SHELL:--preload-file images"
 #        "SHELL:-s USE_GLFW=3"
         "SHELL:-s USE_WEBGPU=1"
 #        "SHELL:-s USE_WEBGL2=1"
