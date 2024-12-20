@@ -1,0 +1,8 @@
+//
+// Created by Esteban Lanter on 20.12.2024.
+//
+
+#ifndef IMAGEFLASHERWGPU_STB_IMAGE_H
+#define IMAGEFLASHERWGPU_STB_IMAGE_H
+
+#endif //IMAGEFLASHERWGPU_STB_IMAGE_H
