@@ -36,8 +36,6 @@ target_compile_options(index
 
 # Set linker flags for Emscripten
 target_link_options(index PRIVATE
-        "SHELL:-s FORCE_FILESYSTEM=1"
-        "SHELL:--preload-file images"
 #        "SHELL:-s USE_GLFW=3"
         "SHELL:-s USE_WEBGPU=1"
 #        "SHELL:-s USE_WEBGL2=1"
@@ -52,6 +50,10 @@ target_link_options(index PRIVATE
 
         "SHELL:-s DISABLE_EXCEPTION_CATCHING=0"
 
+        # Add malloc and free here
+        "SHELL:-s EXPORTED_FUNCTIONS=['_onImageReceived','_malloc','_free']"
+        "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','stackAlloc','stackSave','stackRestore']"
+
 #        "SHELL:-s USE_BOOST_HEADERS=1"
         -pthread
         "SHELL:-s PTHREAD_POOL_SIZE=10"
@@ -59,6 +61,11 @@ target_link_options(index PRIVATE
         # Generate source maps for debugging
         -gsource-map --source-map-base http://localhost:8000/
 )
+
+# Copy HTML, JS, and Python files to the build directory
+configure_file(index.html index.html COPYONLY)
+configure_file(app.js app.js COPYONLY)
+configure_file(serve.py serve.py COPYONLY)
 
 # Conditionally set file system related flags
 set(USE_FILE_SYSTEM 1) # Set this to 1 to enable file-system

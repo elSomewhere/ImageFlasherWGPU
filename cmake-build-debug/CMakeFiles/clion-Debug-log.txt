@@ -1,5 +1,20 @@
-/Applications/CLion.app/Contents/bin/cmake/mac/aarch64/bin/cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_MAKE_PROGRAM=/Applications/CLion.app/Contents/bin/ninja/mac/aarch64/ninja -DCMAKE_TOOLCHAIN_FILE=/Users/estebanlanter/CLionProjects/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake -G Ninja -S /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU -B /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/cmake-build-debug
--- Using toolchain file: /Users/estebanlanter/CLionProjects/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake
--- Configuring done (0.8s)
+/Applications/CLion.app/Contents/bin/cmake/mac/aarch64/bin/cmake -DCMAKE_BUILD_TYPE=Debug -G "CodeBlocks - Unix Makefiles" -S /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU -B /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/cmake-build-debug
+CMake Deprecation Warning:
+  Support for "Extra Generators" like
+
+    CodeBlocks
+
+  is deprecated and will be removed from a future version of CMake.  IDEs may
+  use the cmake-file-api(7) to view CMake-generated project build trees.
+
+
+-- Using toolchain file: 
+-- Configuring done (0.0s)
 -- Generating done (0.0s)
 -- Build files have been written to: /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/cmake-build-debug
+
+Cannot get compiler information:
+	Compiler exited with error code 1: /Users/estebanlanter/CLionProjects/emsdk/upstream/emscripten/em++ -xc++ -g -std=gnu++20 -arch arm64 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX14.4.sdk -mmacosx-version-min=14.0 -Wall -Wformat -O0 -gsource-map -s USE_BOOST_HEADERS=1 -s USE_PTHREADS=1 -pthread -fpch-preprocess -v -dD -E
+	em++: error: arm64: No such file or directory ("arm64" was expected to be an input file, based on the commandline arguments provided)
+	
+	
