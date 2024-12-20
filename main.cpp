@@ -10,6 +10,7 @@
 #include <array>
 #include <chrono>
 #include <cstdlib>
+#include <memory>
 
 #include <emscripten.h>
 #include <emscripten/html5.h> // For emscripten_request_animation_frame_loop
@@ -83,10 +84,6 @@ wgpu::RenderPipeline pipeline;
 wgpu::Surface surfaceGlobal;
 wgpu::TextureFormat swapChainFormat;
 
-// Forward declarations
-EM_BOOL frame(double time, void* userData);
-void cleanup();
-
 struct ImageData {
     std::vector<uint8_t> pixels; // RGBA8
     uint32_t width;
@@ -98,8 +95,10 @@ template<typename T>
 class ThreadSafeQueue {
 public:
     void push(const T& value) {
-        std::lock_guard<std::mutex> lock(mutex_);
-        queue_.push(value);
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            queue_.push(value);
+        }
         condition_.notify_one();
     }
 
@@ -107,7 +106,15 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         if (queue_.empty())
             return false;
-        value = queue_.front();
+        value = std::move(queue_.front());
+        queue_.pop();
+        return true;
+    }
+
+    bool popBlocking(T& value) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        condition_.wait(lock, [this]{return !queue_.empty();});
+        value = std::move(queue_.front());
         queue_.pop();
         return true;
     }
@@ -117,6 +124,42 @@ private:
     std::queue<T> queue_;
     std::condition_variable condition_;
 };
+
+// Forward declarations
+EM_BOOL frame(double time, void* userData);
+void cleanup();
+
+// We will have two queues now:
+// 1. rawDataQueue: For raw PNG data from WebSocket
+// 2. imageFlasher->imageQueue_: For final decoded/resized images
+ThreadSafeQueue<std::vector<uint8_t>> rawDataQueue;
+
+// decodeAndResizeImage helper function
+bool decodeAndResizeImage(const uint8_t* data, int length, ImageData& imageOut) {
+    int x, y, n;
+    unsigned char* img = stbi_load_from_memory((const unsigned char*)data, length, &x, &y, &n, 4);
+    if (!img) {
+        std::cerr << "Failed to decode image from memory" << std::endl;
+        return false;
+    }
+
+    const int desiredWidth = 512;
+    const int desiredHeight = 512;
+    std::vector<unsigned char> resized(desiredWidth * desiredHeight * 4);
+    int result = stbir_resize_uint8(img, x, y, 0,
+                                    resized.data(), desiredWidth, desiredHeight, 0,
+                                    4);
+    stbi_image_free(img);
+    if (!result) {
+        std::cerr << "Failed to resize fetched image." << std::endl;
+        return false;
+    }
+
+    imageOut.width = desiredWidth;
+    imageOut.height = desiredHeight;
+    imageOut.pixels = std::move(resized);
+    return true;
+}
 
 // ImageFlasher
 class ImageFlasher {
@@ -129,6 +172,9 @@ public:
     void render(wgpu::RenderPassEncoder& pass);
     void swapBuffers();
     wgpu::PipelineLayout getPipelineLayout() const { return pipelineLayout_; }
+
+    // Make imageQueue_ accessible by decode thread if needed
+    ThreadSafeQueue<ImageData>& getImageQueue() { return imageQueue_; }
 
 private:
     void uploadImage(const ImageData& image, int buffer);
@@ -156,7 +202,6 @@ private:
     std::array<std::vector<wgpu::TextureView>, 2> textureViews_;
     std::array<std::vector<wgpu::BindGroup>, 2> bindGroups_;
 
-    mutable std::mutex mutex_;
     ThreadSafeQueue<ImageData> imageQueue_;
     int bufferIndex_; // 0 or 1
 };
@@ -404,7 +449,7 @@ void createRenderPipeline() {
 
     wgpu::ColorTargetState colorTarget = {};
     colorTarget.format = swapChainFormat;
-    colorTarget.writeMask = wgpu::ColorWriteMask::All; // Add this line
+    colorTarget.writeMask = wgpu::ColorWriteMask::All;
 
     wgpu::FragmentState fragmentState = {};
     fragmentState.module = fsModule;
@@ -415,10 +460,8 @@ void createRenderPipeline() {
     desc.fragment = &fragmentState;
     desc.layout = pipelineLayout;
     desc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
-    desc.primitive.stripIndexFormat = wgpu::IndexFormat::Undefined;
     desc.primitive.frontFace = wgpu::FrontFace::CCW;
     desc.primitive.cullMode = wgpu::CullMode::None;
-
     desc.multisample.count = 1;
     desc.multisample.mask = ~0u;
     desc.multisample.alphaToCoverageEnabled = false;
@@ -446,7 +489,6 @@ void initializeSwapChainAndPipeline(wgpu::Surface surface) {
         return;
     }
 
-    // Set swapChainFormat here
     swapChainFormat = wgpu::TextureFormat::BGRA8Unorm;
 
     constexpr uint32_t RING_BUFFER_SIZE = 1024;
@@ -458,55 +500,46 @@ void initializeSwapChainAndPipeline(wgpu::Surface surface) {
     emscripten_request_animation_frame_loop(frame, nullptr);
 }
 
-// Decode and resize image data (PNG) from memory
-bool decodeAndResizeImage(const uint8_t* data, int length, ImageData& imageOut) {
-    int x, y, n;
-    unsigned char* img = stbi_load_from_memory((const unsigned char*)data, length, &x, &y, &n, 4);
-    if (!img) {
-        std::cerr << "Failed to decode image from memory" << std::endl;
-        return false;
-    }
+// Worker thread to decode & resize images
+std::atomic<bool> decodeWorkerRunning(true);
+std::thread decodeWorkerThread;
 
-    const int desiredWidth = 512;
-    const int desiredHeight = 512;
-    std::vector<unsigned char> resized(desiredWidth * desiredHeight * 4);
-    int result = stbir_resize_uint8(img, x, y, 0,
-                                    resized.data(), desiredWidth, desiredHeight, 0,
-                                    4);
-    stbi_image_free(img);
-    if (!result) {
-        std::cerr << "Failed to resize fetched image." << std::endl;
-        return false;
-    }
+void decodeWorkerFunc() {
+    while (decodeWorkerRunning) {
+        std::vector<uint8_t> rawData;
+        if (!rawDataQueue.popBlocking(rawData)) {
+            continue; // Shouldn't happen due to blocking pop
+        }
 
-    imageOut.width = desiredWidth;
-    imageOut.height = desiredHeight;
-    imageOut.pixels = std::move(resized);
-    return true;
+        ImageData imgData;
+        if (!decodeAndResizeImage(rawData.data(), (int)rawData.size(), imgData)) {
+            continue; // Failed to decode/resize
+        }
+
+        // Push decoded image to imageFlasher queue
+        if (imageFlasher) {
+            imageFlasher->pushImage(imgData);
+        }
+    }
 }
 
 // Called from JS when we receive image data over WebSocket
 extern "C" {
 EMSCRIPTEN_KEEPALIVE
 void onImageReceived(uint8_t* data, int length) {
-    ImageData imgData;
-    if (!decodeAndResizeImage(data, length, imgData)) {
-        std::cerr << "Failed to decode/resize image received via WebSocket." << std::endl;
-        return;
-    }
-    imageFlasher->pushImage(imgData);
+    // Instead of decoding here, just push raw data to rawDataQueue
+    std::vector<uint8_t> raw(data, data + length);
+    rawDataQueue.push(raw);
 }
 }
 
 EM_BOOL frame(double time, void* userData) {
     if (!swapChain) {
-        std::cerr << "Swap chain not initialized." << std::endl;
         return EM_FALSE;
     }
 
     wgpu::TextureView backbuffer = swapChain.GetCurrentTextureView();
     if (!backbuffer) {
-        std::cerr << "Failed to get current texture view." << std::endl;
         return EM_FALSE;
     }
 
@@ -537,6 +570,10 @@ EM_BOOL frame(double time, void* userData) {
 }
 
 void cleanup() {
+    decodeWorkerRunning = false;
+    if (decodeWorkerThread.joinable()) {
+        decodeWorkerThread.join();
+    }
     delete imageFlasher;
     imageFlasher = nullptr;
 }
@@ -549,6 +586,10 @@ void onDeviceRequestEnded(WGPURequestDeviceStatus status, WGPUDevice cDevice, co
 
         WGPUSurface surface = (WGPUSurface)userdata;
         initializeSwapChainAndPipeline(wgpu::Surface::Acquire(surface));
+
+        // Start decode worker now that imageFlasher is ready
+        decodeWorkerThread = std::thread(decodeWorkerFunc);
+
     } else {
         std::cerr << "Failed to create device: " << (message ? message : "Unknown error") << std::endl;
     }

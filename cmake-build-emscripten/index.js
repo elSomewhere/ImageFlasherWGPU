@@ -4395,6 +4395,36 @@ var ___handle_stack_overflow = requested => {
  abort(`stack overflow (Attempt to set SP to ${ptrToString(requested)}` + `, with stack limits [${ptrToString(end)} - ${ptrToString(base)}` + "]). If you require more stack space build with -sSTACK_SIZE=<bytes>");
 };
 
+function pthreadCreateProxied(pthread_ptr, attr, startRoutine, arg) {
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(2, 1, pthread_ptr, attr, startRoutine, arg);
+ return ___pthread_create_js(pthread_ptr, attr, startRoutine, arg);
+}
+
+var ___pthread_create_js = (pthread_ptr, attr, startRoutine, arg) => {
+ if (typeof SharedArrayBuffer == "undefined") {
+  err("Current environment does not support SharedArrayBuffer, pthreads are not available!");
+  return 6;
+ }
+ var transferList = [];
+ var error = 0;
+ if (ENVIRONMENT_IS_PTHREAD && (transferList.length === 0 || error)) {
+  return pthreadCreateProxied(pthread_ptr, attr, startRoutine, arg);
+ }
+ if (error) return error;
+ var threadParams = {
+  startRoutine: startRoutine,
+  pthread_ptr: pthread_ptr,
+  arg: arg,
+  transferList: transferList
+ };
+ if (ENVIRONMENT_IS_PTHREAD) {
+  threadParams.cmd = "spawnThread";
+  postMessage(threadParams, transferList);
+  return 0;
+ }
+ return spawnThread(threadParams);
+};
+
 var nowIsMonotonic = 1;
 
 var __emscripten_get_now_is_monotonic = () => nowIsMonotonic;
@@ -4653,7 +4683,7 @@ var getBoundingClientRect = e => specialHTMLTargets.indexOf(e) < 0 ? e.getBoundi
 };
 
 function _emscripten_get_element_css_size(target, width, height) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(2, 1, target, width, height);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(3, 1, target, width, height);
  target = findEventTarget(target);
  if (!target) return -4;
  var rect = getBoundingClientRect(target);
@@ -5262,7 +5292,7 @@ var stringToAscii = (str, buffer) => {
 };
 
 var _environ_get = function(__environ, environ_buf) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(3, 1, __environ, environ_buf);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(4, 1, __environ, environ_buf);
  var bufSize = 0;
  getEnvStrings().forEach((string, i) => {
   var ptr = environ_buf + bufSize;
@@ -5275,7 +5305,7 @@ var _environ_get = function(__environ, environ_buf) {
 };
 
 var _environ_sizes_get = function(penviron_count, penviron_buf_size) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(4, 1, penviron_count, penviron_buf_size);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(5, 1, penviron_count, penviron_buf_size);
  var strings = getEnvStrings();
  GROWABLE_HEAP_U32()[((penviron_count) >> 2)] = strings.length;
  checkInt32(strings.length);
@@ -5287,7 +5317,7 @@ var _environ_sizes_get = function(penviron_count, penviron_buf_size) {
 };
 
 function _fd_close(fd) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(5, 1, fd);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(6, 1, fd);
  try {
   var stream = SYSCALLS.getStreamFromFD(fd);
   FS.close(stream);
@@ -5316,7 +5346,7 @@ function _fd_close(fd) {
 };
 
 function _fd_read(fd, iov, iovcnt, pnum) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(6, 1, fd, iov, iovcnt, pnum);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(7, 1, fd, iov, iovcnt, pnum);
  try {
   var stream = SYSCALLS.getStreamFromFD(fd);
   var num = doReadv(stream, iov, iovcnt);
@@ -5330,7 +5360,7 @@ function _fd_read(fd, iov, iovcnt, pnum) {
 }
 
 function _fd_seek(fd, offset_low, offset_high, whence, newOffset) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(7, 1, fd, offset_low, offset_high, whence, newOffset);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(8, 1, fd, offset_low, offset_high, whence, newOffset);
  var offset = convertI32PairToI53Checked(offset_low, offset_high);
  try {
   if (isNaN(offset)) return 61;
@@ -5364,7 +5394,7 @@ function _fd_seek(fd, offset_low, offset_high, whence, newOffset) {
 };
 
 function _fd_write(fd, iov, iovcnt, pnum) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(8, 1, fd, iov, iovcnt, pnum);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(9, 1, fd, iov, iovcnt, pnum);
  try {
   var stream = SYSCALLS.getStreamFromFD(fd);
   var num = doWritev(stream, iov, iovcnt);
@@ -5805,7 +5835,7 @@ var WebGPU = {
 };
 
 function _wgpuAdapterRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(9, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(10, 1, id);
  return WebGPU.mgrAdapter.release(id);
 }
 
@@ -5815,7 +5845,7 @@ var runtimeKeepalivePop = () => {
 };
 
 function _wgpuAdapterRequestDevice(adapterId, descriptor, callback, userdata) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(10, 1, adapterId, descriptor, callback, userdata);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(11, 1, adapterId, descriptor, callback, userdata);
  var adapter = WebGPU.mgrAdapter.get(adapterId);
  var desc = {};
  if (descriptor) {
@@ -5917,42 +5947,42 @@ function _wgpuAdapterRequestDevice(adapterId, descriptor, callback, userdata) {
 }
 
 function _wgpuBindGroupLayoutReference(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(11, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(12, 1, id);
  return WebGPU.mgrBindGroupLayout.reference(id);
 }
 
 function _wgpuBindGroupLayoutRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(12, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(13, 1, id);
  return WebGPU.mgrBindGroupLayout.release(id);
 }
 
 function _wgpuBindGroupReference(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(13, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(14, 1, id);
  return WebGPU.mgrBindGroup.reference(id);
 }
 
 function _wgpuBindGroupRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(14, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(15, 1, id);
  return WebGPU.mgrBindGroup.release(id);
 }
 
 function _wgpuBufferReference(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(15, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(16, 1, id);
  return WebGPU.mgrBuffer.reference(id);
 }
 
 function _wgpuBufferRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(16, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(17, 1, id);
  return WebGPU.mgrBuffer.release(id);
 }
 
 function _wgpuCommandBufferRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(17, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(18, 1, id);
  return WebGPU.mgrCommandBuffer.release(id);
 }
 
 function _wgpuCommandEncoderBeginRenderPass(encoderId, descriptor) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(18, 1, encoderId, descriptor);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(19, 1, encoderId, descriptor);
  assert(descriptor);
  function makeColorAttachment(caPtr) {
   var viewPtr = GROWABLE_HEAP_U32()[(((caPtr) + (4)) >> 2)];
@@ -6032,25 +6062,25 @@ function _wgpuCommandEncoderBeginRenderPass(encoderId, descriptor) {
 }
 
 function _wgpuCommandEncoderFinish(encoderId, descriptor) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(19, 1, encoderId, descriptor);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(20, 1, encoderId, descriptor);
  var commandEncoder = WebGPU.mgrCommandEncoder.get(encoderId);
  return WebGPU.mgrCommandBuffer.create(commandEncoder["finish"]());
 }
 
 function _wgpuCommandEncoderRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(20, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(21, 1, id);
  return WebGPU.mgrCommandEncoder.release(id);
 }
 
 function _wgpuCreateInstance(descriptor) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(21, 1, descriptor);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(22, 1, descriptor);
  return 1;
 }
 
 var readI53FromI64 = ptr => GROWABLE_HEAP_U32()[((ptr) >> 2)] + GROWABLE_HEAP_I32()[(((ptr) + (4)) >> 2)] * 4294967296;
 
 function _wgpuDeviceCreateBindGroup(deviceId, descriptor) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(22, 1, deviceId, descriptor);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(23, 1, deviceId, descriptor);
  assert(descriptor);
  assert(GROWABLE_HEAP_U32()[((descriptor) >> 2)] === 0);
  function makeEntry(entryPtr) {
@@ -6102,7 +6132,7 @@ function _wgpuDeviceCreateBindGroup(deviceId, descriptor) {
 }
 
 function _wgpuDeviceCreateBindGroupLayout(deviceId, descriptor) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(23, 1, deviceId, descriptor);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(24, 1, deviceId, descriptor);
  assert(descriptor);
  assert(GROWABLE_HEAP_U32()[((descriptor) >> 2)] === 0);
  function makeBufferEntry(entryPtr) {
@@ -6171,7 +6201,7 @@ function _wgpuDeviceCreateBindGroupLayout(deviceId, descriptor) {
 }
 
 function _wgpuDeviceCreateBuffer(deviceId, descriptor) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(24, 1, deviceId, descriptor);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(25, 1, deviceId, descriptor);
  assert(descriptor);
  assert(GROWABLE_HEAP_U32()[((descriptor) >> 2)] === 0);
  var mappedAtCreation = (GROWABLE_HEAP_I8()[(((descriptor) + (24)) >> 0)] !== 0);
@@ -6194,7 +6224,7 @@ function _wgpuDeviceCreateBuffer(deviceId, descriptor) {
 }
 
 function _wgpuDeviceCreateCommandEncoder(deviceId, descriptor) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(25, 1, deviceId, descriptor);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(26, 1, deviceId, descriptor);
  var desc;
  if (descriptor) {
   assert(descriptor);
@@ -6210,7 +6240,7 @@ function _wgpuDeviceCreateCommandEncoder(deviceId, descriptor) {
 }
 
 function _wgpuDeviceCreatePipelineLayout(deviceId, descriptor) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(26, 1, deviceId, descriptor);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(27, 1, deviceId, descriptor);
  assert(descriptor);
  assert(GROWABLE_HEAP_U32()[((descriptor) >> 2)] === 0);
  var bglCount = GROWABLE_HEAP_U32()[(((descriptor) + (8)) >> 2)];
@@ -6230,7 +6260,7 @@ function _wgpuDeviceCreatePipelineLayout(deviceId, descriptor) {
 }
 
 function generateRenderPipelineDesc(descriptor) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(28, 1, descriptor);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(29, 1, descriptor);
  assert(descriptor);
  assert(GROWABLE_HEAP_U32()[((descriptor) >> 2)] === 0);
  function makePrimitiveState(rsPtr) {
@@ -6386,14 +6416,14 @@ function generateRenderPipelineDesc(descriptor) {
 }
 
 function _wgpuDeviceCreateRenderPipeline(deviceId, descriptor) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(27, 1, deviceId, descriptor);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(28, 1, deviceId, descriptor);
  var desc = generateRenderPipelineDesc(descriptor);
  var device = WebGPU.mgrDevice.get(deviceId);
  return WebGPU.mgrRenderPipeline.create(device["createRenderPipeline"](desc));
 }
 
 function _wgpuDeviceCreateSampler(deviceId, descriptor) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(29, 1, deviceId, descriptor);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(30, 1, deviceId, descriptor);
  var desc;
  if (descriptor) {
   assert(descriptor);
@@ -6418,7 +6448,7 @@ function _wgpuDeviceCreateSampler(deviceId, descriptor) {
 }
 
 function _wgpuDeviceCreateShaderModule(deviceId, descriptor) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(30, 1, deviceId, descriptor);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(31, 1, deviceId, descriptor);
  assert(descriptor);
  var nextInChainPtr = GROWABLE_HEAP_U32()[((descriptor) >> 2)];
  assert(nextInChainPtr !== 0);
@@ -6456,7 +6486,7 @@ function _wgpuDeviceCreateShaderModule(deviceId, descriptor) {
 }
 
 function _wgpuDeviceCreateSwapChain(deviceId, surfaceId, descriptor) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(31, 1, deviceId, surfaceId, descriptor);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(32, 1, deviceId, surfaceId, descriptor);
  assert(descriptor);
  assert(GROWABLE_HEAP_U32()[((descriptor) >> 2)] === 0);
  var device = WebGPU.mgrDevice.get(deviceId);
@@ -6480,7 +6510,7 @@ function _wgpuDeviceCreateSwapChain(deviceId, surfaceId, descriptor) {
 }
 
 function _wgpuDeviceCreateTexture(deviceId, descriptor) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(32, 1, deviceId, descriptor);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(33, 1, deviceId, descriptor);
  assert(descriptor);
  assert(GROWABLE_HEAP_U32()[((descriptor) >> 2)] === 0);
  var desc = {
@@ -6506,7 +6536,7 @@ function _wgpuDeviceCreateTexture(deviceId, descriptor) {
 }
 
 function _wgpuDeviceGetQueue(deviceId) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(33, 1, deviceId);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(34, 1, deviceId);
  var queueId = WebGPU.mgrDevice.objects[deviceId].queueId;
  assert(queueId, "wgpuDeviceGetQueue: queue was missing or null");
  WebGPU.mgrQueue.reference(queueId);
@@ -6514,17 +6544,17 @@ function _wgpuDeviceGetQueue(deviceId) {
 }
 
 function _wgpuDeviceReference(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(34, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(35, 1, id);
  return WebGPU.mgrDevice.reference(id);
 }
 
 function _wgpuDeviceRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(35, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(36, 1, id);
  return WebGPU.mgrDevice.release(id);
 }
 
 var _wgpuDeviceSetUncapturedErrorCallback = function(deviceId, callback, userdata) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(36, 1, deviceId, callback, userdata);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(37, 1, deviceId, callback, userdata);
  var device = WebGPU.mgrDevice.get(deviceId);
  device["onuncapturederror"] = function(ev) {
   callUserCallback(() => {
@@ -6542,7 +6572,7 @@ var _wgpuDeviceSetUncapturedErrorCallback = function(deviceId, callback, userdat
 var findCanvasEventTarget = target => findEventTarget(target);
 
 function _wgpuInstanceCreateSurface(instanceId, descriptor) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(37, 1, instanceId, descriptor);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(38, 1, instanceId, descriptor);
  assert(descriptor);
  assert(instanceId === 1, "WGPUInstance must be created by wgpuCreateInstance");
  var nextInChainPtr = GROWABLE_HEAP_U32()[((descriptor) >> 2)];
@@ -6563,7 +6593,7 @@ function _wgpuInstanceCreateSurface(instanceId, descriptor) {
 }
 
 function _wgpuInstanceRequestAdapter(instanceId, options, callback, userdata) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(38, 1, instanceId, options, callback, userdata);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(39, 1, instanceId, options, callback, userdata);
  assert(instanceId === 1, "WGPUInstance must be created by wgpuCreateInstance");
  var opts;
  if (options) {
@@ -6607,27 +6637,27 @@ function _wgpuInstanceRequestAdapter(instanceId, options, callback, userdata) {
 }
 
 function _wgpuPipelineLayoutReference(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(39, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(40, 1, id);
  return WebGPU.mgrPipelineLayout.reference(id);
 }
 
 function _wgpuPipelineLayoutRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(40, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(41, 1, id);
  return WebGPU.mgrPipelineLayout.release(id);
 }
 
 function _wgpuQuerySetRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(41, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(42, 1, id);
  return WebGPU.mgrQuerySet.release(id);
 }
 
 function _wgpuQueueRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(42, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(43, 1, id);
  return WebGPU.mgrQueue.release(id);
 }
 
 function _wgpuQueueSubmit(queueId, commandCount, commands) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(43, 1, queueId, commandCount, commands);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(44, 1, queueId, commandCount, commands);
  assert(commands % 4 === 0);
  var queue = WebGPU.mgrQueue.get(queueId);
  var cmds = Array.from(GROWABLE_HEAP_I32().subarray((commands) >> 2, (commands + commandCount * 4) >> 2), function(id) {
@@ -6637,7 +6667,7 @@ function _wgpuQueueSubmit(queueId, commandCount, commands) {
 }
 
 function _wgpuQueueWriteBuffer(queueId, bufferId, bufferOffset_low, bufferOffset_high, data, size) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(44, 1, queueId, bufferId, bufferOffset_low, bufferOffset_high, data, size);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(45, 1, queueId, bufferId, bufferOffset_low, bufferOffset_high, data, size);
  var bufferOffset = convertI32PairToI53Checked(bufferOffset_low, bufferOffset_high);
  var queue = WebGPU.mgrQueue.get(queueId);
  var buffer = WebGPU.mgrBuffer.get(bufferId);
@@ -6646,7 +6676,7 @@ function _wgpuQueueWriteBuffer(queueId, bufferId, bufferOffset_low, bufferOffset
 }
 
 function _wgpuQueueWriteTexture(queueId, destinationPtr, data, dataSize, dataLayoutPtr, writeSizePtr) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(45, 1, queueId, destinationPtr, data, dataSize, dataLayoutPtr, writeSizePtr);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(46, 1, queueId, destinationPtr, data, dataSize, dataLayoutPtr, writeSizePtr);
  var queue = WebGPU.mgrQueue.get(queueId);
  var destination = WebGPU.makeImageCopyTexture(destinationPtr);
  var dataLayout = WebGPU.makeTextureDataLayout(dataLayoutPtr);
@@ -6656,24 +6686,24 @@ function _wgpuQueueWriteTexture(queueId, destinationPtr, data, dataSize, dataLay
 }
 
 function _wgpuRenderPassEncoderDraw(passId, vertexCount, instanceCount, firstVertex, firstInstance) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(46, 1, passId, vertexCount, instanceCount, firstVertex, firstInstance);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(47, 1, passId, vertexCount, instanceCount, firstVertex, firstInstance);
  var pass = WebGPU.mgrRenderPassEncoder.get(passId);
  pass["draw"](vertexCount, instanceCount, firstVertex, firstInstance);
 }
 
 function _wgpuRenderPassEncoderEnd(encoderId) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(47, 1, encoderId);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(48, 1, encoderId);
  var encoder = WebGPU.mgrRenderPassEncoder.get(encoderId);
  encoder["end"]();
 }
 
 function _wgpuRenderPassEncoderRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(48, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(49, 1, id);
  return WebGPU.mgrRenderPassEncoder.release(id);
 }
 
 function _wgpuRenderPassEncoderSetBindGroup(passId, groupIndex, groupId, dynamicOffsetCount, dynamicOffsetsPtr) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(49, 1, passId, groupIndex, groupId, dynamicOffsetCount, dynamicOffsetsPtr);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(50, 1, passId, groupIndex, groupId, dynamicOffsetCount, dynamicOffsetsPtr);
  var pass = WebGPU.mgrRenderPassEncoder.get(passId);
  var group = WebGPU.mgrBindGroup.get(groupId);
  if (dynamicOffsetCount == 0) {
@@ -6688,55 +6718,55 @@ function _wgpuRenderPassEncoderSetBindGroup(passId, groupIndex, groupId, dynamic
 }
 
 function _wgpuRenderPassEncoderSetPipeline(passId, pipelineId) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(50, 1, passId, pipelineId);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(51, 1, passId, pipelineId);
  var pass = WebGPU.mgrRenderPassEncoder.get(passId);
  var pipeline = WebGPU.mgrRenderPipeline.get(pipelineId);
  pass["setPipeline"](pipeline);
 }
 
 function _wgpuRenderPipelineRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(51, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(52, 1, id);
  return WebGPU.mgrRenderPipeline.release(id);
 }
 
 function _wgpuSamplerReference(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(52, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(53, 1, id);
  return WebGPU.mgrSampler.reference(id);
 }
 
 function _wgpuSamplerRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(53, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(54, 1, id);
  return WebGPU.mgrSampler.release(id);
 }
 
 function _wgpuShaderModuleReference(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(54, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(55, 1, id);
  return WebGPU.mgrShaderModule.reference(id);
 }
 
 function _wgpuShaderModuleRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(55, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(56, 1, id);
  return WebGPU.mgrShaderModule.release(id);
 }
 
 function _wgpuSurfaceRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(56, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(57, 1, id);
  return WebGPU.mgrSurface.release(id);
 }
 
 function _wgpuSwapChainGetCurrentTextureView(swapChainId) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(57, 1, swapChainId);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(58, 1, swapChainId);
  var context = WebGPU.mgrSwapChain.get(swapChainId);
  return WebGPU.mgrTextureView.create(context["getCurrentTexture"]()["createView"]());
 }
 
 function _wgpuSwapChainRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(58, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(59, 1, id);
  return WebGPU.mgrSwapChain.release(id);
 }
 
 function _wgpuTextureCreateView(textureId, descriptor) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(59, 1, textureId, descriptor);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(60, 1, textureId, descriptor);
  var desc;
  if (descriptor) {
   assert(descriptor);
@@ -6760,22 +6790,22 @@ function _wgpuTextureCreateView(textureId, descriptor) {
 }
 
 function _wgpuTextureReference(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(60, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(61, 1, id);
  return WebGPU.mgrTexture.reference(id);
 }
 
 function _wgpuTextureRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(61, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(62, 1, id);
  return WebGPU.mgrTexture.release(id);
 }
 
 function _wgpuTextureViewReference(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(62, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(63, 1, id);
  return WebGPU.mgrTextureView.reference(id);
 }
 
 function _wgpuTextureViewRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(63, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(64, 1, id);
  return WebGPU.mgrTextureView.release(id);
 }
 
@@ -6902,7 +6932,7 @@ FS.staticInit();
 
 WebGPU.initManagers();
 
-var proxiedFunctionTable = [ _proc_exit, exitOnMainThread, _emscripten_get_element_css_size, _environ_get, _environ_sizes_get, _fd_close, _fd_read, _fd_seek, _fd_write, _wgpuAdapterRelease, _wgpuAdapterRequestDevice, _wgpuBindGroupLayoutReference, _wgpuBindGroupLayoutRelease, _wgpuBindGroupReference, _wgpuBindGroupRelease, _wgpuBufferReference, _wgpuBufferRelease, _wgpuCommandBufferRelease, _wgpuCommandEncoderBeginRenderPass, _wgpuCommandEncoderFinish, _wgpuCommandEncoderRelease, _wgpuCreateInstance, _wgpuDeviceCreateBindGroup, _wgpuDeviceCreateBindGroupLayout, _wgpuDeviceCreateBuffer, _wgpuDeviceCreateCommandEncoder, _wgpuDeviceCreatePipelineLayout, _wgpuDeviceCreateRenderPipeline, generateRenderPipelineDesc, _wgpuDeviceCreateSampler, _wgpuDeviceCreateShaderModule, _wgpuDeviceCreateSwapChain, _wgpuDeviceCreateTexture, _wgpuDeviceGetQueue, _wgpuDeviceReference, _wgpuDeviceRelease, _wgpuDeviceSetUncapturedErrorCallback, _wgpuInstanceCreateSurface, _wgpuInstanceRequestAdapter, _wgpuPipelineLayoutReference, _wgpuPipelineLayoutRelease, _wgpuQuerySetRelease, _wgpuQueueRelease, _wgpuQueueSubmit, _wgpuQueueWriteBuffer, _wgpuQueueWriteTexture, _wgpuRenderPassEncoderDraw, _wgpuRenderPassEncoderEnd, _wgpuRenderPassEncoderRelease, _wgpuRenderPassEncoderSetBindGroup, _wgpuRenderPassEncoderSetPipeline, _wgpuRenderPipelineRelease, _wgpuSamplerReference, _wgpuSamplerRelease, _wgpuShaderModuleReference, _wgpuShaderModuleRelease, _wgpuSurfaceRelease, _wgpuSwapChainGetCurrentTextureView, _wgpuSwapChainRelease, _wgpuTextureCreateView, _wgpuTextureReference, _wgpuTextureRelease, _wgpuTextureViewReference, _wgpuTextureViewRelease ];
+var proxiedFunctionTable = [ _proc_exit, exitOnMainThread, pthreadCreateProxied, _emscripten_get_element_css_size, _environ_get, _environ_sizes_get, _fd_close, _fd_read, _fd_seek, _fd_write, _wgpuAdapterRelease, _wgpuAdapterRequestDevice, _wgpuBindGroupLayoutReference, _wgpuBindGroupLayoutRelease, _wgpuBindGroupReference, _wgpuBindGroupRelease, _wgpuBufferReference, _wgpuBufferRelease, _wgpuCommandBufferRelease, _wgpuCommandEncoderBeginRenderPass, _wgpuCommandEncoderFinish, _wgpuCommandEncoderRelease, _wgpuCreateInstance, _wgpuDeviceCreateBindGroup, _wgpuDeviceCreateBindGroupLayout, _wgpuDeviceCreateBuffer, _wgpuDeviceCreateCommandEncoder, _wgpuDeviceCreatePipelineLayout, _wgpuDeviceCreateRenderPipeline, generateRenderPipelineDesc, _wgpuDeviceCreateSampler, _wgpuDeviceCreateShaderModule, _wgpuDeviceCreateSwapChain, _wgpuDeviceCreateTexture, _wgpuDeviceGetQueue, _wgpuDeviceReference, _wgpuDeviceRelease, _wgpuDeviceSetUncapturedErrorCallback, _wgpuInstanceCreateSurface, _wgpuInstanceRequestAdapter, _wgpuPipelineLayoutReference, _wgpuPipelineLayoutRelease, _wgpuQuerySetRelease, _wgpuQueueRelease, _wgpuQueueSubmit, _wgpuQueueWriteBuffer, _wgpuQueueWriteTexture, _wgpuRenderPassEncoderDraw, _wgpuRenderPassEncoderEnd, _wgpuRenderPassEncoderRelease, _wgpuRenderPassEncoderSetBindGroup, _wgpuRenderPassEncoderSetPipeline, _wgpuRenderPipelineRelease, _wgpuSamplerReference, _wgpuSamplerRelease, _wgpuShaderModuleReference, _wgpuShaderModuleRelease, _wgpuSurfaceRelease, _wgpuSwapChainGetCurrentTextureView, _wgpuSwapChainRelease, _wgpuTextureCreateView, _wgpuTextureReference, _wgpuTextureRelease, _wgpuTextureViewReference, _wgpuTextureViewRelease ];
 
 function checkIncomingModuleAPI() {
  ignoredModuleProp("fetchSettings");
@@ -6920,6 +6950,7 @@ var wasmImports = {
  /** @export */ __emscripten_init_main_thread_js: ___emscripten_init_main_thread_js,
  /** @export */ __emscripten_thread_cleanup: ___emscripten_thread_cleanup,
  /** @export */ __handle_stack_overflow: ___handle_stack_overflow,
+ /** @export */ __pthread_create_js: ___pthread_create_js,
  /** @export */ __resumeException: ___resumeException,
  /** @export */ _emscripten_get_now_is_monotonic: __emscripten_get_now_is_monotonic,
  /** @export */ _emscripten_notify_mailbox_postmessage: __emscripten_notify_mailbox_postmessage,
