@@ -6993,6 +6993,7 @@ var wasmImports = {
  /** @export */ invoke_iii: invoke_iii,
  /** @export */ invoke_iiii: invoke_iiii,
  /** @export */ invoke_iiiii: invoke_iiiii,
+ /** @export */ invoke_iiiiid: invoke_iiiiid,
  /** @export */ invoke_iiiiii: invoke_iiiiii,
  /** @export */ invoke_iiiiiii: invoke_iiiiiii,
  /** @export */ invoke_iiiiiiii: invoke_iiiiiiii,
@@ -7091,6 +7092,10 @@ var _getBufferUsage = Module["_getBufferUsage"] = createExportWrapper("getBuffer
 var _getRingBufferSize = Module["_getRingBufferSize"] = createExportWrapper("getRingBufferSize");
 
 var _setMaxUploadsPerFrame = Module["_setMaxUploadsPerFrame"] = createExportWrapper("setMaxUploadsPerFrame");
+
+var _setScrollingSpeed = Module["_setScrollingSpeed"] = createExportWrapper("setScrollingSpeed");
+
+var _setScrollingOffset = Module["_setScrollingOffset"] = createExportWrapper("setScrollingOffset");
 
 var _main = createExportWrapper("main");
 
@@ -7269,6 +7274,17 @@ function invoke_viiii(index, a1, a2, a3, a4) {
 }
 
 function invoke_iiiiii(index, a1, a2, a3, a4, a5) {
+ var sp = stackSave();
+ try {
+  return getWasmTableEntry(index)(a1, a2, a3, a4, a5);
+ } catch (e) {
+  stackRestore(sp);
+  if (!(e instanceof EmscriptenEH)) throw e;
+  _setThrew(1, 0);
+ }
+}
+
+function invoke_iiiiid(index, a1, a2, a3, a4, a5) {
  var sp = stackSave();
  try {
   return getWasmTableEntry(index)(a1, a2, a3, a4, a5);
