@@ -1,17 +1,21 @@
+#!/usr/bin/env python3
 import asyncio
 import os
 import io
 import random
-from typing import Optional
+from typing import Optional, List, Tuple
 
+import aiohttp
 import websockets
-from PIL import Image, ImageDraw, ImageChops, ImageOps
+import feedparser
 import numpy as np
 import cv2
+from PIL import Image, ImageChops, ImageDraw, ImageOps
 
-# ------------------------------------------------------------------------------------
-# 1) A more sophisticated VHS effect using OpenCV. We wrap it inside a Pillow-based function.
-# ------------------------------------------------------------------------------------
+################################################################################
+# 1) The "better" VHS effect from your original code, but adapted for PIL images
+################################################################################
+
 def apply_better_vhs_effect(
         frame: np.ndarray,
         luma_bandwidth=5,
@@ -22,38 +26,12 @@ def apply_better_vhs_effect(
         ghost_strength=0.3,
         line_glitch_probability=0.005,
         line_glitch_strength=0.8
-):
+) -> np.ndarray:
     """
     Applies a 'better' VHS effect by simulating bandwidth limitation, color bleed,
     ghosting, noise, and random glitch lines on an image (in BGR NumPy array form).
-
-    Parameters
-    ----------
-    frame : np.ndarray
-        Input image in BGR format.
-    luma_bandwidth : int
-        Horizontal blur 'window' for simulating luma bandwidth limitation.
-    chroma_bandwidth : int
-        Horizontal blur 'window' for simulating chroma bandwidth limitation.
-    luma_noise_level : float
-        Standard deviation of random noise on the luminance channel.
-    chroma_noise_level : float
-        Standard deviation of random noise on the chrominance channels.
-    ghost_shift_pixels : int
-        Number of horizontal pixels to shift the ghost/edge image.
-    ghost_strength : float
-        How strongly to overlay the ghost (0.0 to 1.0).
-    line_glitch_probability : float
-        Probability that a given row will contain a “tracking glitch” or distortion.
-    line_glitch_strength : float
-        Magnitude of the glitch distortion shift in a row.
-
-    Returns
-    -------
-    np.ndarray
-        Output BGR image with simulated VHS artifacts.
+    Returns a BGR NumPy array with artifacts.
     """
-
     # Convert to YCrCb
     ycrcb = cv2.cvtColor(frame, cv2.COLOR_BGR2YCrCb).astype(np.float32)
     Y, Cr, Cb = cv2.split(ycrcb)
@@ -128,12 +106,8 @@ def apply_better_vhs_effect(
 
 def apply_vhs_filter_pil(img: Image.Image) -> Image.Image:
     """
-    Applies a more advanced 'VHS/broken TV' style effect using OpenCV
-    but returns a PIL Image.
-
-    1) Convert PIL image to BGR NumPy array
-    2) Apply VHS effect
-    3) Convert back to PIL
+    Takes a PIL Image, converts it to a NumPy BGR array, applies the advanced VHS effect,
+    and returns a new PIL Image in RGB.
     """
     # Convert PIL -> NumPy (RGB)
     img_rgb = np.array(img.convert("RGB"))
@@ -159,93 +133,185 @@ def apply_vhs_filter_pil(img: Image.Image) -> Image.Image:
     return result_pil
 
 
-# ------------------------------------------------------------------------------------
-# 2) A function to create random images from scratch each time.
-# ------------------------------------------------------------------------------------
-def generate_random_image(width=512, height=512, use_vhs_filter=True) -> bytes:
-    """
-    Creates a random image with a random background color or gradient,
-    draws a few random shapes, optionally applies VHS filter,
-    then returns the PNG bytes.
-    """
-    # Create a new image
-    img = Image.new("RGB", (width, height), color=(0, 0, 0))
+################################################################################
+# 2) RSS-based image retrieval logic
+################################################################################
 
-    # Optionally, make a random gradient background
-    color_a = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
-    color_b = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
-    for y in range(height):
-        ratio = y / (height - 1)
-        r = int(color_a[0] * (1 - ratio) + color_b[0] * ratio)
-        g = int(color_a[1] * (1 - ratio) + color_b[1] * ratio)
-        b = int(color_a[2] * (1 - ratio) + color_b[2] * ratio)
-        for x in range(width):
-            img.putpixel((x, y), (r, g, b))
+import feedparser
 
-    # Draw random shapes
-    draw = ImageDraw.Draw(img)
-    for _ in range(5):  # 5 random shapes
-        shape_type = random.choice(["rectangle", "ellipse", "triangle"])
-        x1 = random.randint(0, width - 1)
-        y1 = random.randint(0, height - 1)
-        x2 = random.randint(x1, width)
-        y2 = random.randint(y1, height)
+import aiohttp
+import websockets
 
-        fill_color = (
-            random.randint(0, 255),
-            random.randint(0, 255),
-            random.randint(0, 255),
-            random.randint(50, 200),  # alpha
-        )
-
-        if shape_type == "rectangle":
-            draw.rectangle([x1, y1, x2, y2], fill=fill_color)
-        elif shape_type == "ellipse":
-            draw.ellipse([x1, y1, x2, y2], fill=fill_color)
-        else:  # triangle
-            x3 = random.randint(0, width)
-            y3 = random.randint(0, height)
-            draw.polygon([(x1, y1), (x2, y2), (x3, y3)], fill=fill_color)
-
-    # Optionally apply VHS filter
-    if use_vhs_filter:
-        img = apply_vhs_filter_pil(img)
-
-    # Convert to PNG bytes
-    buf = io.BytesIO()
-    img.save(buf, format='PNG')
-    return buf.getvalue()
-
-
-# ------------------------------------------------------------------------------------
-# 3) WebSocket server that sends random images
-# ------------------------------------------------------------------------------------
+# WebSocket server config
 WS_HOST = "localhost"
 WS_PORT = 5010
 
+# Wait time between checks for each feed (in seconds)
+PER_FEED_DELAY = 5
+
+# The images will be resized to the same final size as your main app expects
 IMAGE_WIDTH = 512
 IMAGE_HEIGHT = 512
 
-SEND_DELAY = 0.5  # seconds between sends
+# A set of RSS feeds known for images
+RSS_FEEDS = [
+    # Example feeds
+    ("BBC World", "http://feeds.bbci.co.uk/news/world/rss.xml"),
+    ("Reddit r/pics", "https://www.reddit.com/r/pics/.rss"),
+    # ... more feed entries ...
+]
 
+
+def extract_image_url_from_entry(entry) -> Optional[str]:
+    """
+    Parse the feed entry to find the first plausible image URL.
+    """
+    # Check media_content
+    media_content = entry.get('media_content', [])
+    for mc in media_content:
+        if 'url' in mc:
+            return mc['url']
+
+    # Check media_thumbnail
+    media_thumbnail = entry.get('media_thumbnail', [])
+    for mt in media_thumbnail:
+        if 'url' in mt:
+            return mt['url']
+
+    # Check enclosure links
+    for link in entry.get('links', []):
+        if link.get('rel') == 'enclosure':
+            href = link.get('href', '')
+            typ = link.get('type', '')
+            if ('image' in typ) or href.lower().endswith(('.jpg', '.jpeg', '.png', '.gif', '.webp')):
+                return href
+    return None
+
+async def fetch_feed(session: aiohttp.ClientSession, url: str) -> Optional[feedparser.FeedParserDict]:
+    """
+    Download the RSS feed data and parse it with feedparser.
+    """
+    try:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                print(f"Error: Failed to fetch {url} HTTP {resp.status}")
+                return None
+            data = await resp.read()
+            feed = feedparser.parse(data)
+            if feed.bozo:
+                print(f"Warning: Feed parse error for {url}: {feed.bozo_exception}")
+                return None
+            return feed
+    except Exception as e:
+        print(f"Error fetching feed {url}: {e}")
+        return None
+
+def is_newer(published: str, last_published: Optional[str]) -> bool:
+    if last_published is None:
+        return True
+    return published > last_published
+
+async def fetch_image(session: aiohttp.ClientSession, url: str) -> Optional[bytes]:
+    """
+    Downloads the image from `url`, resizes it, applies advanced VHS effect,
+    and returns PNG bytes.
+    """
+    try:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                print(f"Failed to download image: HTTP {resp.status} from {url}")
+                return None
+            data = await resp.read()
+
+            # Open via Pillow
+            img = Image.open(io.BytesIO(data))
+
+            # Convert to RGB
+            img = img.convert("RGB")
+
+            # Resize
+            img = img.resize((IMAGE_WIDTH, IMAGE_HEIGHT), Image.LANCZOS)
+
+            # Apply the advanced VHS effect
+            img = apply_vhs_filter_pil(img)
+
+            # Convert back to PNG bytes
+            buf = io.BytesIO()
+            img.save(buf, format='PNG')
+            return buf.getvalue()
+    except Exception as e:
+        print(f"Error downloading/resizing image {url}: {e}")
+        return None
+
+async def fetch_new_images(session: aiohttp.ClientSession, feed_name: str, feed_url: str, last_published: Optional[str]) -> Tuple[List[bytes], Optional[str]]:
+    feed = await fetch_feed(session, feed_url)
+    if not feed or not hasattr(feed, 'entries'):
+        return [], last_published
+
+    entries = feed.entries
+    # Sort them by publication time (the logic may differ if date formats vary)
+    entries = sorted(entries, key=lambda e: e.get('published',''))
+
+    new_images = []
+    updated_last_published = last_published
+
+    for entry in entries:
+        published = entry.get('published', '')
+        if not is_newer(published, last_published):
+            continue
+
+        img_url = extract_image_url_from_entry(entry)
+        if img_url:
+            print(f"[{feed_name}] Found new image: {img_url}")
+            img_data = await fetch_image(session, img_url)
+            if img_data:
+                new_images.append(img_data)
+                if updated_last_published is None or published > updated_last_published:
+                    updated_last_published = published
+
+    return new_images, updated_last_published
+
+async def run_feed_task(session: aiohttp.ClientSession, websocket, feed_name: str, feed_url: str):
+    """
+    A task that runs continuously for a single feed:
+    - Keeps track of the last published time.
+    - Fetches new entries, sends images when found.
+    - Sleeps a short delay between attempts.
+    """
+    last_published = None
+    while True:
+        try:
+            images, updated_pub = await fetch_new_images(session, feed_name, feed_url, last_published)
+            last_published = updated_pub
+            if images:
+                for img in images:
+                    print(f"Sending image from {feed_name}")
+                    await websocket.send(img)
+                    print("Image sent")
+                    await asyncio.sleep(0.05)  # small pause after sending
+        except websockets.ConnectionClosed:
+            print(f"Client disconnected. Stopping feed {feed_name}.")
+            break
+        except Exception as e:
+            print(f"Unhandled error with {feed_name}: {e}")
+
+        # Sleep before next check
+        await asyncio.sleep(PER_FEED_DELAY)
 
 async def image_sender(websocket):
-    """
-    Repeatedly generate random images and send them to the client every SEND_DELAY seconds.
-    """
-    print("WebSocket client connected, starting random image generation.")
-    try:
-        while True:
-            # Generate random image bytes
-            img_data = generate_random_image(width=IMAGE_WIDTH, height=IMAGE_HEIGHT, use_vhs_filter=True)
-            await websocket.send(img_data)
-            print("Sent a random image.")
-            await asyncio.sleep(SEND_DELAY)
-    except websockets.ConnectionClosed:
-        print("Client disconnected.")
-    except Exception as e:
-        print("Unhandled error in image_sender:", e)
+    print("WebSocket client connected, starting parallel feed scanning.")
+    async with aiohttp.ClientSession() as session:
+        # Create a task per feed
+        tasks = []
+        for feed_name, feed_url in RSS_FEEDS:
+            task = asyncio.create_task(run_feed_task(session, websocket, feed_name, feed_url))
+            tasks.append(task)
 
+        # Wait until the websocket closes or tasks fail
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+        # If websocket closes or error hits, cancel all tasks
+        for t in pending:
+            t.cancel()
 
 async def main():
     print(f"Starting WebSocket server on ws://{WS_HOST}:{WS_PORT}")

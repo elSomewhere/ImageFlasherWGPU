@@ -7081,6 +7081,8 @@ var _malloc = Module["_malloc"] = createExportWrapper("malloc");
 
 var _setTileFactor = Module["_setTileFactor"] = createExportWrapper("setTileFactor");
 
+var _setRandomTileFraction = Module["_setRandomTileFraction"] = createExportWrapper("setRandomTileFraction");
+
 var _onImageReceived = Module["_onImageReceived"] = createExportWrapper("onImageReceived");
 
 var _setFadeFactor = Module["_setFadeFactor"] = createExportWrapper("setFadeFactor");
