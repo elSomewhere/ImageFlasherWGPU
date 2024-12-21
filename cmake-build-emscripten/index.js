@@ -7081,6 +7081,8 @@ var _getBufferUsage = Module["_getBufferUsage"] = createExportWrapper("getBuffer
 
 var _getRingBufferSize = Module["_getRingBufferSize"] = createExportWrapper("getRingBufferSize");
 
+var _setMaxUploadsPerFrame = Module["_setMaxUploadsPerFrame"] = createExportWrapper("setMaxUploadsPerFrame");
+
 var _main = createExportWrapper("main");
 
 var __emscripten_tls_init = Module["__emscripten_tls_init"] = createExportWrapper("_emscripten_tls_init");

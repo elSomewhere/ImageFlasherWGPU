@@ -2,49 +2,111 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Image Flasher with WebGPU</title>
+  <title>Information Overload WebGPU</title>
   <style>
-    body {
+    /* Reset & overall theme */
+    html, body {
       margin: 0;
-      font-family: sans-serif; /* Optional nicer font */
+      padding: 0;
+      background-color: black;
+      color: #0f0; /* Hacker green */
+      font-family: "Lucida Console", Monaco, monospace;
+      overflow: hidden; /* Avoid scrollbars */
+    }
+
+    /* Control panel (overlay in top-left corner) */
+    #controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.5); /* Semi-transparent black */
+      border: 1px solid #0f0;
+      border-radius: 3px;
+      padding: 12px;
+      z-index: 10; /* Ensure it stays above the canvas */
+    }
+    label, button, p {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+
+    /* Range sliders: green thumb or default depends on the browser */
+    input[type="range"] {
+      width: 200px;
+      margin: 4px 0;
+      background-color: #222;
+    }
+    /* Fade and switch display values next to the sliders */
+    #fadeValue, #switchValue {
+      margin-left: 6px;
+      width: 40px;
+      display: inline-block;
+      text-align: left;
+    }
+
+    /* Flicker animation for the panel to mimic CRT chatter */
+    @keyframes flicker {
+      0%   { opacity: 1; }
+      50%  { opacity: 0.8; }
+      90%  { opacity: 0.6; }
+      100% { opacity: 1; }
     }
     #controls {
-      padding: 10px;
-      background-color: #f0f0f0;
+      animation: flicker 1.5s infinite alternate;
     }
-    canvas {
-      width: 800px;
-      height: 600px;
+
+    /* The canvas fills the entire viewport for maximum effect */
+    #canvas {
       display: block;
-      margin: 0 auto;
-      background-color: #000;
+      width: 100vw;
+      height: 100vh;
+      background-color: black;
+    }
+
+    /* Optional scanline overlay for CRT vibe */
+    .scanline {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      background: repeating-linear-gradient(
+              to bottom,
+              rgba(0,0,0,0) 0px,
+              rgba(0,0,0,0) 2px,
+              rgba(0,0,0,0.02) 3px
+      );
     }
   </style>
 </head>
 <body>
 
-<!-- A simple control panel above the canvas -->
+<!-- Control panel -->
 <div id="controls">
-  <label for="fadeSlider">Fade Factor (0.0 to 1.0): </label>
+  <label for="fadeSlider">Fade Factor (0.0 to 1.0):</label>
   <input type="range" id="fadeSlider" min="0" max="1" step="0.01" value="0.5" />
   <span id="fadeValue">0.50</span>
-  <br/><br/>
 
-  <label for="switchSlider">Image Switch Interval (seconds): </label>
+  <label for="switchSlider">Image Switch Interval (seconds):</label>
   <input type="range" id="switchSlider" min="0.1" max="5.0" step="0.1" value="0.33" />
   <span id="switchValue">0.33</span>
-  <br/><br/>
 
   <button id="updateBufferUsage">Check Buffer Usage</button>
   <p id="bufferUsageLabel">Buffer usage: 0 / ???</p>
 </div>
 
+<!-- The main rendering surface -->
 <canvas id="canvas"></canvas>
 
-<!-- 1) The Emscripten-generated JS (e.g. "index.js") which loads the WASM -->
+<!-- Optional scanline overlay to evoke an old monitor -->
+<div class="scanline"></div>
+
+<!-- 1) Emscripten-generated JS loading your WASM -->
 <script src="index.js"></script>
 
-<!-- 2) Your custom script with WebSocket + UI code ("app.js") -->
+<!-- 2) Your custom script (WebSocket, UI interactions, etc.) -->
 <script src="app.js"></script>
 
 </body>

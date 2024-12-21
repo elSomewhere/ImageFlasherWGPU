@@ -1,4 +1,6 @@
-// main.cpp
+/*********************
+main.cpp
+*********************/
 
 #include <iostream>
 #include <vector>
@@ -234,21 +236,27 @@ public:
 
     wgpu::PipelineLayout getPipelineLayout() const { return pipelineLayout_; }
 
-    // NEW: Allow changing the image switch interval on the fly
+    // Allow changing the image switch interval on the fly
     void setSwitchInterval(float interval) { imageSwitchInterval_ = interval; }
 
-    // NEW: Expose how many images are currently in front buffer
+    // Expose how many images are currently in front buffer
     int getBufferUsage() const {
         int frontBuffer = bufferIndex_;
         return imagesInBuffer_[frontBuffer];
     }
 
-    // NEW: Expose ringBufferSize
+    // Expose ringBufferSize
     int getRingBufferSize() const {
         return ringBufferSize_;
     }
 
+    // ThreadSafeQueue for decoded images
     ThreadSafeQueue<ImageData>& getImageQueue() { return imageQueue_; }
+
+    // NEW: Allow limiting how many new images we upload per frame
+    void setMaxUploadsPerFrame(int maxUploads) {
+        maxUploadsPerFrame_ = maxUploads; // 0 => unbounded
+    }
 
 private:
     void uploadImage(const ImageData& image, int buffer);
@@ -278,6 +286,9 @@ private:
 
     ThreadSafeQueue<ImageData> imageQueue_;
     int bufferIndex_;
+
+    // New parameter to limit how many images we upload each frame
+    int maxUploadsPerFrame_ = 0; // 0 => unlimited
 };
 
 ImageFlasher* imageFlasher = nullptr;
@@ -428,21 +439,32 @@ void ImageFlasher::update() {
     int frontBuffer = bufferIndex_;
     int backBuffer = 1 - frontBuffer;
 
-    bool uploadedAnyImage = false;
+    // ========== TIME-SLICED UPLOADS ==========
+    // If maxUploadsPerFrame_ == 0, we do unlimited (original behavior).
+    // Otherwise, we only upload up to maxUploadsPerFrame_ new images each frame.
+    int uploadCount = 0;
     while (true) {
+        if (maxUploadsPerFrame_ > 0 && uploadCount >= maxUploadsPerFrame_) {
+            // Reached the limit for this frame
+            break;
+        }
         ImageData image;
         if (!imageQueue_.tryPop(image)) {
+            // No more images to upload
             break;
         }
         uploadImage(image, backBuffer);
-        uploadedAnyImage = true;
+        uploadCount++;
     }
 
+    // If we uploaded anything, swap buffers
+    bool uploadedAnyImage = (uploadCount > 0);
     if (uploadedAnyImage) {
         swapBuffers();
         frontBuffer = bufferIndex_;
     }
 
+    // ========== IMAGE SWITCH INTERVAL ==========
     if (imagesInBuffer_[frontBuffer] > 0) {
         auto now = std::chrono::steady_clock::now();
         std::chrono::duration<float> elapsed = now - lastSwitchTime_[frontBuffer];
@@ -466,6 +488,7 @@ void ImageFlasher::update() {
 void ImageFlasher::render(wgpu::RenderPassEncoder& pass) {
     int frontBuffer = bufferIndex_;
     if (imagesInBuffer_[frontBuffer] == 0) {
+        // No images in front buffer yet, just bind the 0th group
         pass.SetBindGroup(0, bindGroups_[frontBuffer][0]);
         return;
     }
@@ -726,6 +749,11 @@ void createPipelinePresent() {
     pipelinePresent = device.CreateRenderPipeline(&desc);
 }
 
+// ========== Debug for dropped frames ==========
+static double lastFrameTime = 0.0;
+static int droppedFrames = 0;
+static int frameCount = 0;
+
 extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
     wgpu::SwapChainDescriptor scDesc = {};
     scDesc.format = wgpu::TextureFormat::BGRA8Unorm;
@@ -766,12 +794,32 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
         commonSampler = device.CreateSampler(&sd);
     }
 
-    emscripten_request_animation_frame_loop([](double /*time*/, void*) {
+    emscripten_request_animation_frame_loop([](double time, void*) {
+        // ========== Dropped-frame detection ==========
+        if (lastFrameTime > 0) {
+            double dt = time - lastFrameTime;
+            // If we took more than 25 ms between frames, mark as "dropped" or "slow."
+            if (dt > 25.0) {
+                droppedFrames++;
+            }
+        }
+        lastFrameTime = time;
+        frameCount++;
+        // Print some debug every 60 frames
+        if (frameCount % 60 == 0) {
+            std::cout << "[DEBUG] Frame count: " << frameCount
+                      << " | Dropped frames so far: " << droppedFrames
+                      << std::endl;
+        }
+
+        // Acquire swap chain view
         wgpu::TextureView swapChainView = swapChain.GetCurrentTextureView();
         if(!swapChainView) return EM_TRUE;
 
+        // Update logic
         imageFlasher->update();
 
+        // Record commands
         wgpu::CommandEncoder encoder = device.CreateCommandEncoder({});
 
         // ========== Pass #1: newFrame pass ==========
@@ -938,14 +986,14 @@ void onImageReceived(uint8_t* data, int length) {
     rawDataQueue.push(raw);
 }
 
-// NEW: Let JS update the fade factor
+// Let JS update the fade factor
 EMSCRIPTEN_KEEPALIVE
 void setFadeFactor(float factor) {
     if (!fadeUniformBuffer) return;
     queue.WriteBuffer(fadeUniformBuffer, 0, &factor, sizeof(float));
 }
 
-// NEW: Let JS update the image switch interval
+// Let JS update the image switch interval
 EMSCRIPTEN_KEEPALIVE
 void setImageSwitchInterval(float interval) {
     if (imageFlasher) {
@@ -953,18 +1001,26 @@ void setImageSwitchInterval(float interval) {
     }
 }
 
-// NEW: Query how many images are currently in the front buffer
+// Query how many images are currently in the front buffer
 EMSCRIPTEN_KEEPALIVE
 int getBufferUsage() {
     if (!imageFlasher) return 0;
     return imageFlasher->getBufferUsage();
 }
 
-// NEW: Query ring buffer size
+// Query ring buffer size
 EMSCRIPTEN_KEEPALIVE
 int getRingBufferSize() {
     if (!imageFlasher) return 0;
     return imageFlasher->getRingBufferSize();
+}
+
+// NEW: Set max uploads per frame (0 => unbounded)
+EMSCRIPTEN_KEEPALIVE
+void setMaxUploadsPerFrame(int maxUploads) {
+    if (imageFlasher) {
+        imageFlasher->setMaxUploadsPerFrame(maxUploads);
+    }
 }
 }
 
