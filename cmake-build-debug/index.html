@@ -6,7 +6,11 @@
   <style>
     body {
       margin: 0;
-      overflow: hidden;
+      font-family: sans-serif; /* Optional nicer font */
+    }
+    #controls {
+      padding: 10px;
+      background-color: #f0f0f0;
     }
     canvas {
       width: 800px;
@@ -18,12 +22,29 @@
   </style>
 </head>
 <body>
+
+<!-- A simple control panel above the canvas -->
+<div id="controls">
+  <label for="fadeSlider">Fade Factor (0.0 to 1.0): </label>
+  <input type="range" id="fadeSlider" min="0" max="1" step="0.01" value="0.5" />
+  <span id="fadeValue">0.50</span>
+  <br/><br/>
+
+  <label for="switchSlider">Image Switch Interval (seconds): </label>
+  <input type="range" id="switchSlider" min="0.1" max="5.0" step="0.1" value="0.33" />
+  <span id="switchValue">0.33</span>
+  <br/><br/>
+
+  <button id="updateBufferUsage">Check Buffer Usage</button>
+  <p id="bufferUsageLabel">Buffer usage: 0 / ???</p>
+</div>
+
 <canvas id="canvas"></canvas>
 
-<!-- Load Emscripten-generated script first -->
+<!-- 1) The Emscripten-generated JS (e.g. "index.js") which loads the WASM -->
 <script src="index.js"></script>
 
-<!-- Load your custom index.js afterward -->
+<!-- 2) Your custom script with WebSocket + UI code ("app.js") -->
 <script src="app.js"></script>
 
 </body>

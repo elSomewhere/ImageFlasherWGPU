@@ -2,161 +2,49 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Information Overload WebGPU</title>
+  <title>Image Flasher with WebGPU</title>
   <style>
-    /* Overall theme */
-    html, body {
+    body {
       margin: 0;
-      padding: 0;
-      background-color: black;
-      color: #0f0; /* Hacker green */
-      font-family: "Lucida Console", Monaco, monospace;
-      overflow: hidden; /* Hide scrollbars */
+      font-family: sans-serif; /* Optional nicer font */
     }
-
-    /* Control panel */
     #controls {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      background: rgba(0, 0, 0, 0.5);
-      border: 1px solid #0f0;
-      border-radius: 3px;
-      padding: 10px 12px;
-      z-index: 10;
-      animation: flicker 2s infinite alternate; /* flicker effect */
-      width: 320px;
+      padding: 10px;
+      background-color: #f0f0f0;
     }
-
-    label, button, p {
+    canvas {
+      width: 800px;
+      height: 600px;
       display: block;
-      margin-bottom: 6px;
-      font-size: 14px;
-    }
-    .slider-row {
-      margin-bottom: 10px;
-    }
-    .slider-row label {
-      display: inline-block;
-      width: 150px;
-    }
-    .slider-row input[type="range"] {
-      width: 110px;
-      background-color: #222;
-    }
-    .slider-value {
-      margin-left: 6px;
-      display: inline-block;
-      width: 40px;
-      text-align: left;
-    }
-
-    /* Flicker animation */
-    @keyframes flicker {
-      0%   { opacity: 1; }
-      50%  { opacity: 0.85; }
-      90%  { opacity: 0.7; }
-      100% { opacity: 1; }
-    }
-
-    /* The canvas will fill the viewport */
-    #canvas {
-      width: 100vw;
-      height: 100vh;
-      display: block;
-      background-color: black;
-    }
-
-    /* Scanline overlay for CRT vibe */
-    .scanline {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-      background: repeating-linear-gradient(
-              to bottom,
-              rgba(0,0,0,0) 0px,
-              rgba(0,0,0,0) 2px,
-              rgba(0,0,0,0.02) 3px
-      );
-      z-index: 5;
+      margin: 0 auto;
+      background-color: #000;
     }
   </style>
 </head>
 <body>
 
+<!-- A simple control panel above the canvas -->
 <div id="controls">
-  <!-- 1) Fade Factor -->
-  <div class="slider-row">
-    <label for="fadeSlider">Fade Factor (0..1):</label>
-    <input type="range" id="fadeSlider" min="0" max="1" step="0.01" value="0.5">
-    <span id="fadeValue" class="slider-value">0.50</span>
-  </div>
+  <label for="fadeSlider">Fade Factor (0.0 to 1.0): </label>
+  <input type="range" id="fadeSlider" min="0" max="1" step="0.01" value="0.5" />
+  <span id="fadeValue">0.50</span>
+  <br/><br/>
 
-  <!-- 2) Switch Interval -->
-  <div class="slider-row">
-    <label for="switchSlider">Switch Interval (0.1..5s):</label>
-    <input type="range" id="switchSlider" min="0.1" max="5.0" step="0.1" value="0.33">
-    <span id="switchValue" class="slider-value">0.33</span>
-  </div>
+  <label for="switchSlider">Image Switch Interval (seconds): </label>
+  <input type="range" id="switchSlider" min="0.1" max="5.0" step="0.1" value="0.33" />
+  <span id="switchValue">0.33</span>
+  <br/><br/>
 
-  <!-- 3) Tile Factor -->
-  <div class="slider-row">
-    <label for="tileSlider">Tile Factor (0..4):</label>
-    <input type="range" id="tileSlider" min="0" max="4" step="1" value="3">
-    <span id="tileValue" class="slider-value">3</span>
-  </div>
-
-  <!-- 4) Scrolling Speed X -->
-  <div class="slider-row">
-    <label for="scrollSpeedX">Scroll Speed X (-1..1):</label>
-    <input type="range" id="scrollSpeedX" min="-1" max="1" step="0.01" value="0.1">
-    <span id="scrollSpeedXVal" class="slider-value">0.10</span>
-  </div>
-
-  <!-- 5) Scrolling Speed Y -->
-  <div class="slider-row">
-    <label for="scrollSpeedY">Scroll Speed Y (-1..1):</label>
-    <input type="range" id="scrollSpeedY" min="-1" max="1" step="0.01" value="0.00">
-    <span id="scrollSpeedYVal" class="slider-value">0.00</span>
-  </div>
-
-  <!-- 6) Scrolling Offset X -->
-  <div class="slider-row">
-    <label for="scrollOffsetX">Offset X (0..1):</label>
-    <input type="range" id="scrollOffsetX" min="0" max="1" step="0.01" value="0.10">
-    <span id="scrollOffsetXVal" class="slider-value">0.10</span>
-  </div>
-
-  <!-- 7) Scrolling Offset Y -->
-  <div class="slider-row">
-    <label for="scrollOffsetY">Offset Y (0..1):</label>
-    <input type="range" id="scrollOffsetY" min="0" max="1" step="0.01" value="0.00">
-    <span id="scrollOffsetYVal" class="slider-value">0.00</span>
-  </div>
-
-  <!-- 8) Max Uploads per Frame -->
-  <div class="slider-row">
-    <label for="uploadsSlider">Max Uploads/frame (0=∞):</label>
-    <input type="range" id="uploadsSlider" min="0" max="10" step="1" value="3">
-    <span id="uploadsValue" class="slider-value">0</span>
-  </div>
-
-  <!-- A button to check buffer usage -->
   <button id="updateBufferUsage">Check Buffer Usage</button>
   <p id="bufferUsageLabel">Buffer usage: 0 / ???</p>
 </div>
 
 <canvas id="canvas"></canvas>
-<div class="scanline"></div>
 
-<!-- 1) Emscripten-generated JS (which loads the WASM).
-     The default name is often "index.js" depending on your build -->
+<!-- 1) The Emscripten-generated JS (e.g. "index.js") which loads the WASM -->
 <script src="index.js"></script>
 
-<!-- 2) Our custom script hooking up all the UI -->
+<!-- 2) Your custom script with WebSocket + UI code ("app.js") -->
 <script src="app.js"></script>
 
 </body>
