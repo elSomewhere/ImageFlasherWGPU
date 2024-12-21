@@ -7073,6 +7073,14 @@ var _malloc = Module["_malloc"] = createExportWrapper("malloc");
 
 var _onImageReceived = Module["_onImageReceived"] = createExportWrapper("onImageReceived");
 
+var _setFadeFactor = Module["_setFadeFactor"] = createExportWrapper("setFadeFactor");
+
+var _setImageSwitchInterval = Module["_setImageSwitchInterval"] = createExportWrapper("setImageSwitchInterval");
+
+var _getBufferUsage = Module["_getBufferUsage"] = createExportWrapper("getBufferUsage");
+
+var _getRingBufferSize = Module["_getRingBufferSize"] = createExportWrapper("getRingBufferSize");
+
 var _main = createExportWrapper("main");
 
 var __emscripten_tls_init = Module["__emscripten_tls_init"] = createExportWrapper("_emscripten_tls_init");

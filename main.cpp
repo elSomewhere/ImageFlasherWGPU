@@ -31,7 +31,6 @@ void HandleUncapturedError(WGPUErrorType type, const char* message, void* userda
 
 // ==================== SHADERS ====================
 
-// Common vertex shader: draws two triangles covering the clip-space quad
 const char* vertexShaderWGSL = R"(
 struct VSOutput {
     @builtin(position) Position : vec4<f32>,
@@ -63,7 +62,6 @@ fn vsMain(@builtin(vertex_index) vid : u32) -> VSOutput {
 }
 )";
 
-// FRAGMENT #1: Renders from ImageFlasher's 2D-array texture
 const char* imageFlasherFragmentWGSL = R"(
 struct Uniforms {
     layerIndex : i32
@@ -78,7 +76,6 @@ fn fsImage(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
 }
 )";
 
-// FRAGMENT #2: Fades "oldFrame" + "newFrame" => "oldFrame"
 const char* fadeFragmentWGSL = R"(
 @group(0) @binding(0) var oldFrame : texture_2d<f32>;
 @group(0) @binding(1) var newFrame : texture_2d<f32>;
@@ -90,17 +87,15 @@ struct FadeParams {
 
 @group(0) @binding(3) var s : sampler;
 
-// We blend oldFrame & newFrame with factor fadeParam.fade
 @fragment
 fn fsFade(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
     let cOld = textureSample(oldFrame, s, uv);
     let cNew = textureSample(newFrame, s, uv);
-    let alpha = fadeParam.fade; // e.g. 0.5 => 80% new, 20% old
+    let alpha = fadeParam.fade;
     return mix(cOld, cNew, alpha);
 }
 )";
 
-// FRAGMENT #3: Just draws the "oldFrame" directly to swap chain
 const char* presentFragmentWGSL = R"(
 @group(0) @binding(0) var oldFrame : texture_2d<f32>;
 @group(0) @binding(1) var s : sampler;
@@ -111,7 +106,6 @@ fn fsPresent(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
 }
 )";
 
-// A simple "copy" fragment: srcTex -> output
 const char* copyFragmentWGSL = R"(
 @group(0) @binding(0) var srcTex : texture_2d<f32>;
 @group(0) @binding(1) var s : sampler;
@@ -137,34 +131,30 @@ wgpu::TextureFormat swapChainFormat;
 uint32_t g_canvasWidth = 0;
 uint32_t g_canvasHeight = 0;
 
-// We'll have three pipelines:
-wgpu::RenderPipeline pipelineImageFlasher; // Renders the new image => newFrameTexture
-wgpu::RenderPipeline pipelineFade;         // Fades oldFrame + newFrame => oldFrame
-wgpu::RenderPipeline pipelinePresent;      // Draws oldFrame => swap chain
+wgpu::RenderPipeline pipelineImageFlasher;
+wgpu::RenderPipeline pipelineFade;
+wgpu::RenderPipeline pipelinePresent;
 
-// We'll store fadeFactor in a uniform buffer
 wgpu::Buffer fadeUniformBuffer;
 wgpu::Sampler commonSampler;
 
-// Additional texture for staging oldFrame => oldFrameTemp, so that we can read and write oldFrame in separate passes
 wgpu::Texture oldFrameTempTexture;
 wgpu::TextureView oldFrameTempView;
 
-// The two “offscreen” textures for layering:
 wgpu::Texture oldFrameTexture;
 wgpu::TextureView oldFrameView;
 
 wgpu::Texture newFrameTexture;
 wgpu::TextureView newFrameView;
 
-// We'll define a struct to hold "ImageData" from the decode thread, etc.
+// ========== Data Structures ==========
+
 struct ImageData {
     std::vector<uint8_t> pixels;
     uint32_t width;
     uint32_t height;
 };
 
-// Thread-safe queue
 template<typename T>
 class ThreadSafeQueue {
 public:
@@ -199,16 +189,8 @@ private:
     std::condition_variable condition_;
 };
 
-// Forward declarations
-EM_BOOL frame(double time, void* userData);
-void cleanup();
-
-// We will have two queues now:
-// 1. rawDataQueue: For raw PNG data from WebSocket
-// 2. imageFlasher->imageQueue_: For final decoded/resized images
 ThreadSafeQueue<std::vector<uint8_t>> rawDataQueue;
 
-// decodeAndResizeImage helper function
 bool decodeAndResizeImage(const uint8_t* data, int length, ImageData& imageOut) {
     int x, y, n;
     unsigned char* img = stbi_load_from_memory((const unsigned char*)data, length, &x, &y, &n, 4);
@@ -219,7 +201,10 @@ bool decodeAndResizeImage(const uint8_t* data, int length, ImageData& imageOut) 
     const int desiredWidth = 512;
     const int desiredHeight = 512;
     std::vector<unsigned char> resized(desiredWidth * desiredHeight * 4);
-    int result = stbir_resize_uint8(img, x, y, 0, resized.data(), desiredWidth, desiredHeight, 0, 4);
+    int result = stbir_resize_uint8(
+            img, x, y, 0,
+            resized.data(), desiredWidth, desiredHeight, 0, 4
+    );
     stbi_image_free(img);
     if (!result) {
         std::cerr << "Failed to resize image.\n";
@@ -231,9 +216,12 @@ bool decodeAndResizeImage(const uint8_t* data, int length, ImageData& imageOut) 
     return true;
 }
 
+// Forward declarations
+EM_BOOL frame(double time, void* userData);
+void cleanup();
+
 // ========== ImageFlasher Class ==========
-// This class organizes a ring buffer of 2D-array textures, but we only actually
-// sample one image at a time. See usage in the main loop.
+
 class ImageFlasher {
 public:
     ImageFlasher(wgpu::Device device, uint32_t ringBufferSize, float imageSwitchInterval);
@@ -243,7 +231,22 @@ public:
     void update();
     void render(wgpu::RenderPassEncoder& pass);
     void swapBuffers();
+
     wgpu::PipelineLayout getPipelineLayout() const { return pipelineLayout_; }
+
+    // NEW: Allow changing the image switch interval on the fly
+    void setSwitchInterval(float interval) { imageSwitchInterval_ = interval; }
+
+    // NEW: Expose how many images are currently in front buffer
+    int getBufferUsage() const {
+        int frontBuffer = bufferIndex_;
+        return imagesInBuffer_[frontBuffer];
+    }
+
+    // NEW: Expose ringBufferSize
+    int getRingBufferSize() const {
+        return ringBufferSize_;
+    }
 
     ThreadSafeQueue<ImageData>& getImageQueue() { return imageQueue_; }
 
@@ -274,7 +277,7 @@ private:
     std::array<std::vector<wgpu::BindGroup>, 2> bindGroups_;
 
     ThreadSafeQueue<ImageData> imageQueue_;
-    int bufferIndex_; // 0 or 1
+    int bufferIndex_;
 };
 
 ImageFlasher* imageFlasher = nullptr;
@@ -463,7 +466,6 @@ void ImageFlasher::update() {
 void ImageFlasher::render(wgpu::RenderPassEncoder& pass) {
     int frontBuffer = bufferIndex_;
     if (imagesInBuffer_[frontBuffer] == 0) {
-        // No images loaded yet; just bind the 0th
         pass.SetBindGroup(0, bindGroups_[frontBuffer][0]);
         return;
     }
@@ -490,7 +492,7 @@ void ImageFlasher::swapBuffers() {
     }
 }
 
-// ========== Helpers to create Shaders/Textures/etc. ==========
+// ========== Pipeline Creation & Rendering Setup ==========
 
 wgpu::ShaderModule createShaderModule(const char* code) {
     wgpu::ShaderModuleWGSLDescriptor wgslDesc = {};
@@ -503,7 +505,6 @@ wgpu::ShaderModule createShaderModule(const char* code) {
 }
 
 void createOffscreenTextures(uint32_t w, uint32_t h) {
-    // oldFrameTexture
     {
         wgpu::TextureDescriptor desc = {};
         desc.size.width = w;
@@ -514,8 +515,6 @@ void createOffscreenTextures(uint32_t w, uint32_t h) {
         oldFrameTexture = device.CreateTexture(&desc);
         oldFrameView = oldFrameTexture.CreateView();
     }
-
-    // newFrameTexture
     {
         wgpu::TextureDescriptor desc = {};
         desc.size.width = w;
@@ -526,8 +525,6 @@ void createOffscreenTextures(uint32_t w, uint32_t h) {
         newFrameTexture = device.CreateTexture(&desc);
         newFrameView = newFrameTexture.CreateView();
     }
-
-    // oldFrameTempTexture
     {
         wgpu::TextureDescriptor desc = {};
         desc.size.width = w;
@@ -540,13 +537,10 @@ void createOffscreenTextures(uint32_t w, uint32_t h) {
     }
 }
 
-// ========== Create Pipelines ==========
-
 void createPipelineCopy() {
     wgpu::ShaderModule vs = createShaderModule(vertexShaderWGSL);
     wgpu::ShaderModule fs = createShaderModule(copyFragmentWGSL);
 
-    // Bind group layout for pipelineCopy
     wgpu::BindGroupLayoutEntry bglEntries[2] = {};
     bglEntries[0].binding = 0;
     bglEntries[0].visibility = wgpu::ShaderStage::Fragment;
@@ -591,11 +585,8 @@ void createPipelineCopy() {
 }
 
 void createPipelineImageFlasher() {
-    // Renders from the ImageFlasher's 2D array => "newFrameTexture"
     wgpu::ShaderModule vs = createShaderModule(vertexShaderWGSL);
     wgpu::ShaderModule fs = createShaderModule(imageFlasherFragmentWGSL);
-
-    // We'll use the layout from the imageFlasher
     wgpu::PipelineLayout layout = imageFlasher->getPipelineLayout();
 
     wgpu::RenderPipelineDescriptor desc = {};
@@ -612,8 +603,8 @@ void createPipelineImageFlasher() {
     fsState.entryPoint = "fsImage";
     fsState.targetCount = 1;
     fsState.targets = &colorTarget;
-
     desc.fragment = &fsState;
+
     desc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
     desc.primitive.cullMode = wgpu::CullMode::None;
     desc.multisample.count = 1;
@@ -622,30 +613,25 @@ void createPipelineImageFlasher() {
 }
 
 void createPipelineFade() {
-    // oldFrame + newFrame => oldFrame
     wgpu::ShaderModule vs = createShaderModule(vertexShaderWGSL);
     wgpu::ShaderModule fs = createShaderModule(fadeFragmentWGSL);
 
     wgpu::BindGroupLayoutEntry bglEntries[4] = {};
-    // oldFrame
-    bglEntries[0].binding = 0;
+    bglEntries[0].binding = 0; // oldFrame
     bglEntries[0].visibility = wgpu::ShaderStage::Fragment;
     bglEntries[0].texture.sampleType = wgpu::TextureSampleType::Float;
     bglEntries[0].texture.viewDimension = wgpu::TextureViewDimension::e2D;
 
-    // newFrame
-    bglEntries[1].binding = 1;
+    bglEntries[1].binding = 1; // newFrame
     bglEntries[1].visibility = wgpu::ShaderStage::Fragment;
     bglEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
     bglEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
 
-    // fadeParam
-    bglEntries[2].binding = 2;
+    bglEntries[2].binding = 2; // fadeParam
     bglEntries[2].visibility = wgpu::ShaderStage::Fragment;
     bglEntries[2].buffer.type = wgpu::BufferBindingType::Uniform;
 
-    // sampler
-    bglEntries[3].binding = 3;
+    bglEntries[3].binding = 3; // sampler
     bglEntries[3].visibility = wgpu::ShaderStage::Fragment;
     bglEntries[3].sampler.type = wgpu::SamplerBindingType::Filtering;
 
@@ -665,7 +651,7 @@ void createPipelineFade() {
     desc.vertex.entryPoint = "vsMain";
 
     wgpu::ColorTargetState colorTarget = {};
-    colorTarget.format = wgpu::TextureFormat::RGBA8Unorm; // We render into oldFrameTexture
+    colorTarget.format = wgpu::TextureFormat::RGBA8Unorm;
     colorTarget.writeMask = wgpu::ColorWriteMask::All;
 
     wgpu::FragmentState fsState = {};
@@ -673,40 +659,37 @@ void createPipelineFade() {
     fsState.entryPoint = "fsFade";
     fsState.targetCount = 1;
     fsState.targets = &colorTarget;
-
     desc.fragment = &fsState;
+
     desc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
     desc.primitive.cullMode = wgpu::CullMode::None;
     desc.multisample.count = 1;
 
     pipelineFade = device.CreateRenderPipeline(&desc);
 
-    // Create fadeUniformBuffer
+    // fadeUniformBuffer
     {
         wgpu::BufferDescriptor bd = {};
         bd.size = sizeof(float);
         bd.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
         fadeUniformBuffer = device.CreateBuffer(&bd);
 
-        float fadeFactor = 0.5f; // default fade factor
+        float fadeFactor = 0.5f; // default
         queue.WriteBuffer(fadeUniformBuffer, 0, &fadeFactor, sizeof(fadeFactor));
     }
 }
 
 void createPipelinePresent() {
-    // oldFrame => swap chain
     wgpu::ShaderModule vs = createShaderModule(vertexShaderWGSL);
     wgpu::ShaderModule fs = createShaderModule(presentFragmentWGSL);
 
     wgpu::BindGroupLayoutEntry bglEntries[2] = {};
-    // oldFrame
-    bglEntries[0].binding = 0;
+    bglEntries[0].binding = 0; // oldFrame
     bglEntries[0].visibility = wgpu::ShaderStage::Fragment;
     bglEntries[0].texture.sampleType = wgpu::TextureSampleType::Float;
     bglEntries[0].texture.viewDimension = wgpu::TextureViewDimension::e2D;
 
-    // sampler
-    bglEntries[1].binding = 1;
+    bglEntries[1].binding = 1; // sampler
     bglEntries[1].visibility = wgpu::ShaderStage::Fragment;
     bglEntries[1].sampler.type = wgpu::SamplerBindingType::Filtering;
 
@@ -726,7 +709,7 @@ void createPipelinePresent() {
     desc.vertex.entryPoint = "vsMain";
 
     wgpu::ColorTargetState ct = {};
-    ct.format = swapChainFormat; // final output
+    ct.format = swapChainFormat;
     ct.writeMask = wgpu::ColorWriteMask::All;
 
     wgpu::FragmentState fsState = {};
@@ -734,19 +717,14 @@ void createPipelinePresent() {
     fsState.entryPoint = "fsPresent";
     fsState.targetCount = 1;
     fsState.targets = &ct;
-
     desc.fragment = &fsState;
+
     desc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
     desc.primitive.cullMode = wgpu::CullMode::None;
     desc.multisample.count = 1;
 
     pipelinePresent = device.CreateRenderPipeline(&desc);
 }
-
-// We'll also create the bind groups for fade + present in the frame loop (or on init).
-// For convenience, we’ll create them dynamically each frame referencing the current views
-// or create re-usable ones if the textures aren't changing.
-// In the code below, we create them inline in each pass, but you can also cache them.
 
 extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
     wgpu::SwapChainDescriptor scDesc = {};
@@ -769,21 +747,16 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
     }
     swapChainFormat = scDesc.format;
 
-    // Create ImageFlasher
-    constexpr uint32_t RING_BUFFER_SIZE = 1024;
-    constexpr float IMAGE_SWITCH_INTERVAL = 1.0f/3.0f;
-    imageFlasher = new ImageFlasher(device, RING_BUFFER_SIZE, IMAGE_SWITCH_INTERVAL);
+    // Example ring buffer: 1024 images max
+    // Example switch interval: 1.0f/3 => new image every ~0.33 sec if available
+    imageFlasher = new ImageFlasher(device, 1024, 1.0f/3);
 
-    // Create pipelines
     createPipelineImageFlasher();
     createPipelineFade();
     createPipelinePresent();
     createPipelineCopy();
-
-    // Create offscreen textures
     createOffscreenTextures(g_canvasWidth, g_canvasHeight);
 
-    // Common sampler if not already
     {
         wgpu::SamplerDescriptor sd = {};
         sd.minFilter = wgpu::FilterMode::Linear;
@@ -793,18 +766,15 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
         commonSampler = device.CreateSampler(&sd);
     }
 
-    // Start the main loop via request_animation_frame_loop
     emscripten_request_animation_frame_loop([](double /*time*/, void*) {
-        // 1) Acquire swapChainView
         wgpu::TextureView swapChainView = swapChain.GetCurrentTextureView();
         if(!swapChainView) return EM_TRUE;
 
-        // 2) Update flasher
         imageFlasher->update();
 
         wgpu::CommandEncoder encoder = device.CreateCommandEncoder({});
 
-        // ========== Pass #1: "newFrame pass" ==========
+        // ========== Pass #1: newFrame pass ==========
         {
             wgpu::RenderPassColorAttachment att = {};
             att.view = newFrameView;
@@ -825,14 +795,12 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
 
         // ========== Pass #2: copy oldFrame => oldFrameTemp ==========
         {
-            // We'll build a short-lived bind group for the copy pipeline:
             wgpu::BindGroup copyBG = [&]{
                 wgpu::BindGroupLayout bgl = pipelineCopy.GetBindGroupLayout(0);
-
                 wgpu::BindGroupEntry entries[2] = {};
-                entries[0].binding = 0;  // srcTex
+                entries[0].binding = 0;
                 entries[0].textureView = oldFrameView;
-                entries[1].binding = 1;  // sampler
+                entries[1].binding = 1;
                 entries[1].sampler = commonSampler;
 
                 wgpu::BindGroupDescriptor bd = {};
@@ -859,24 +827,19 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
             pass.End();
         }
 
-        // ========== Pass #3: fade pass => oldFrame ( blending oldFrameTemp & newFrame ) ==========
+        // ========== Pass #3: fade pass => oldFrame ==========
         {
-            // Another short-lived bind group for the fade pipeline
             wgpu::BindGroup fadeBG = [&]{
                 wgpu::BindGroupLayout bgl = pipelineFade.GetBindGroupLayout(0);
                 wgpu::BindGroupEntry e[4] = {};
-                // oldFrame => oldFrameTempView
-                e[0].binding = 0;
+                e[0].binding = 0; // oldFrame
                 e[0].textureView = oldFrameTempView;
-                // newFrame
-                e[1].binding = 1;
+                e[1].binding = 1; // newFrame
                 e[1].textureView = newFrameView;
-                // fadeParam
-                e[2].binding = 2;
+                e[2].binding = 2; // fadeUniform
                 e[2].buffer = fadeUniformBuffer;
                 e[2].size = sizeof(float);
-                // sampler
-                e[3].binding = 3;
+                e[3].binding = 3; // sampler
                 e[3].sampler = commonSampler;
 
                 wgpu::BindGroupDescriptor bd = {};
@@ -887,7 +850,7 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
             }();
 
             wgpu::RenderPassColorAttachment att = {};
-            att.view = oldFrameView;     // Overwrite oldFrame with fade result
+            att.view = oldFrameView;
             att.loadOp = wgpu::LoadOp::Clear;
             att.storeOp = wgpu::StoreOp::Store;
             att.clearValue = {0,0,0,1};
@@ -903,7 +866,7 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
             pass.End();
         }
 
-        // ========== Pass #4: present pass => oldFrame => swapChain ==========
+        // ========== Pass #4: present pass => swap chain ==========
         {
             wgpu::RenderPassColorAttachment att = {};
             att.view = swapChainView;
@@ -915,12 +878,13 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
             desc.colorAttachmentCount = 1;
             desc.colorAttachments = &att;
 
-            // Another short-lived bind group for the present pipeline
+            wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&desc);
+
             wgpu::BindGroup presentBG = [&] {
                 wgpu::BindGroupLayout bgl = pipelinePresent.GetBindGroupLayout(0);
                 wgpu::BindGroupEntry e[2] = {};
                 e[0].binding = 0;
-                e[0].textureView = oldFrameView;  // reading from oldFrame
+                e[0].textureView = oldFrameView;
                 e[1].binding = 1;
                 e[1].sampler = commonSampler;
 
@@ -931,7 +895,6 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
                 return device.CreateBindGroup(&bd);
             }();
 
-            wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&desc);
             pass.SetPipeline(pipelinePresent);
             pass.SetBindGroup(0, presentBG);
             pass.Draw(6);
@@ -954,12 +917,12 @@ void decodeWorkerFunc() {
     while (decodeWorkerRunning) {
         std::vector<uint8_t> rawData;
         if (!rawDataQueue.popBlocking(rawData)) {
-            continue; // Shouldn't happen due to blocking pop
+            continue;
         }
 
         ImageData imgData;
         if (!decodeAndResizeImage(rawData.data(), (int)rawData.size(), imgData)) {
-            continue; // Failed to decode/resize
+            continue;
         }
 
         if (imageFlasher) {
@@ -968,13 +931,40 @@ void decodeWorkerFunc() {
     }
 }
 
-// Called from JS when we receive image data over WebSocket
 extern "C" {
 EMSCRIPTEN_KEEPALIVE
 void onImageReceived(uint8_t* data, int length) {
-    // Instead of decoding here, just push raw data to rawDataQueue
     std::vector<uint8_t> raw(data, data + length);
     rawDataQueue.push(raw);
+}
+
+// NEW: Let JS update the fade factor
+EMSCRIPTEN_KEEPALIVE
+void setFadeFactor(float factor) {
+    if (!fadeUniformBuffer) return;
+    queue.WriteBuffer(fadeUniformBuffer, 0, &factor, sizeof(float));
+}
+
+// NEW: Let JS update the image switch interval
+EMSCRIPTEN_KEEPALIVE
+void setImageSwitchInterval(float interval) {
+    if (imageFlasher) {
+        imageFlasher->setSwitchInterval(interval);
+    }
+}
+
+// NEW: Query how many images are currently in the front buffer
+EMSCRIPTEN_KEEPALIVE
+int getBufferUsage() {
+    if (!imageFlasher) return 0;
+    return imageFlasher->getBufferUsage();
+}
+
+// NEW: Query ring buffer size
+EMSCRIPTEN_KEEPALIVE
+int getRingBufferSize() {
+    if (!imageFlasher) return 0;
+    return imageFlasher->getRingBufferSize();
 }
 }
 
@@ -987,8 +977,6 @@ void cleanup() {
     imageFlasher = nullptr;
 }
 
-// ========== Device/Adapter callbacks ==========
-
 void onDeviceRequestEnded(WGPURequestDeviceStatus status, WGPUDevice cDevice, const char* message, void* userdata) {
     if (status == WGPURequestDeviceStatus_Success) {
         device = wgpu::Device::Acquire(cDevice);
@@ -998,9 +986,7 @@ void onDeviceRequestEnded(WGPURequestDeviceStatus status, WGPUDevice cDevice, co
         WGPUSurface surface = (WGPUSurface)userdata;
         initializeSwapChainAndPipeline(wgpu::Surface::Acquire(surface));
 
-        // Start decode worker now that imageFlasher is ready
         decodeWorkerThread = std::thread(decodeWorkerFunc);
-
     } else {
         std::cerr << "Failed to create device: " << (message ? message : "Unknown error") << std::endl;
     }
@@ -1016,8 +1002,6 @@ void onAdapterRequestEnded(WGPURequestAdapterStatus status, WGPUAdapter cAdapter
         std::cerr << "Failed to get WebGPU adapter: " << (message ? message : "Unknown error") << std::endl;
     }
 }
-
-// ========== main() ==========
 
 int main() {
     WGPUInstanceDescriptor instanceDesc = {};

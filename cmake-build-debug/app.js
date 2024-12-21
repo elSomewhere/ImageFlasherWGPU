@@ -6,7 +6,7 @@
 Module['onRuntimeInitialized'] = () => {
     console.log("Runtime initialized, setting up WebSocket...");
     console.log("Attempting to connect to WebSocket on ws://localhost:5000");
-    let ws = new WebSocket("ws://127.0.0.1:5000");
+    let ws = new WebSocket("ws://127.0.0.1:5010");
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
         console.log("WebSocket connected");
