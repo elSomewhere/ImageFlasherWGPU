@@ -13,6 +13,7 @@ main.cpp
 #include <chrono>
 #include <cstdlib>
 #include <memory>
+#include <cmath>    // for pow, etc.
 
 #include <emscripten.h>
 #include <emscripten/html5.h> // For emscripten_request_animation_frame_loop
@@ -41,6 +42,7 @@ struct VSOutput {
 
 @vertex
 fn vsMain(@builtin(vertex_index) vid : u32) -> VSOutput {
+    // A full-screen quad
     var positions = array<vec2<f32>,6>(
         vec2<f32>(-1.0, -1.0),
         vec2<f32>( 1.0, -1.0),
@@ -74,6 +76,7 @@ struct Uniforms {
 
 @fragment
 fn fsImage(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
+    // "layerIndex" is a uniform telling us which layer in the 2D array to sample.
     return textureSample(texArr, samp, uv, u.layerIndex);
 }
 )";
@@ -231,7 +234,7 @@ public:
 
     void pushImage(const ImageData& image);
     void update();
-    void render(wgpu::RenderPassEncoder& pass);
+    void renderTiles(wgpu::RenderPassEncoder& pass, int tileFactor);
     void swapBuffers();
 
     wgpu::PipelineLayout getPipelineLayout() const { return pipelineLayout_; }
@@ -245,7 +248,7 @@ public:
         return imagesInBuffer_[frontBuffer];
     }
 
-    // Expose ringBufferSize
+    // Expose ring buffer size
     int getRingBufferSize() const {
         return ringBufferSize_;
     }
@@ -253,7 +256,7 @@ public:
     // ThreadSafeQueue for decoded images
     ThreadSafeQueue<ImageData>& getImageQueue() { return imageQueue_; }
 
-    // NEW: Allow limiting how many new images we upload per frame
+    // Allow limiting how many new images we upload per frame
     void setMaxUploadsPerFrame(int maxUploads) {
         maxUploadsPerFrame_ = maxUploads; // 0 => unbounded
     }
@@ -276,7 +279,10 @@ private:
     std::chrono::steady_clock::time_point lastSwitchTime_[2];
 
     wgpu::Sampler sampler_;
+    // We only keep two uniform buffers in the original code, but for
+    // a truly separate layer index per tile, we'll create ephemeral buffers each draw.
     std::array<wgpu::Buffer, 2> uniformBuffers_;
+
     wgpu::PipelineLayout pipelineLayout_;
     wgpu::BindGroupLayout bindGroupLayout_;
 
@@ -287,11 +293,24 @@ private:
     ThreadSafeQueue<ImageData> imageQueue_;
     int bufferIndex_;
 
-    // New parameter to limit how many images we upload each frame
+    // parameter to limit how many images we upload each frame
     int maxUploadsPerFrame_ = 0; // 0 => unlimited
 };
 
 ImageFlasher* imageFlasher = nullptr;
+
+// A global "tile factor" that controls how many images (4^tileFactor) we show
+static int g_tileFactor = 3; // 0 => just 1 tile, 1 => 4 tiles, 2 => 16, etc.
+
+// Exposed to JS
+extern "C" {
+EMSCRIPTEN_KEEPALIVE
+void setTileFactor(int x) {
+    if (x < 0) x = 0;
+    g_tileFactor = x;
+    std::cout << "[INFO] setTileFactor => " << g_tileFactor << std::endl;
+}
+}
 
 ImageFlasher::ImageFlasher(wgpu::Device device, uint32_t ringBufferSize, float imageSwitchInterval)
         : device_(device),
@@ -320,13 +339,12 @@ ImageFlasher::ImageFlasher(wgpu::Device device, uint32_t ringBufferSize, float i
     bglEntries[0].binding = 0;
     bglEntries[0].visibility = wgpu::ShaderStage::Fragment;
     bglEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
-    bglEntries[0].buffer.minBindingSize = 16;
+    bglEntries[0].buffer.minBindingSize = 16; // enough for an i32 + padding
 
     bglEntries[1].binding = 1;
     bglEntries[1].visibility = wgpu::ShaderStage::Fragment;
     bglEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
     bglEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2DArray;
-    bglEntries[1].texture.multisampled = false;
 
     bglEntries[2].binding = 2;
     bglEntries[2].visibility = wgpu::ShaderStage::Fragment;
@@ -343,12 +361,15 @@ ImageFlasher::ImageFlasher(wgpu::Device device, uint32_t ringBufferSize, float i
     plDesc.bindGroupLayouts = &bindGroupLayout_;
     pipelineLayout_ = device_.CreatePipelineLayout(&plDesc);
 
+    // Create the two uniform buffers we had originally
     for (int b = 0; b < 2; ++b) {
         wgpu::BufferDescriptor uniformBufferDesc = {};
         uniformBufferDesc.size = 16;
         uniformBufferDesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
         uniformBuffers_[b] = device_.CreateBuffer(&uniformBufferDesc);
+    }
 
+    for (int b = 0; b < 2; ++b) {
         textureArrays_[b].resize(numTextureArrays);
         textureViews_[b].resize(numTextureArrays);
         bindGroups_[b].resize(numTextureArrays);
@@ -372,11 +393,12 @@ ImageFlasher::ImageFlasher(wgpu::Device device, uint32_t ringBufferSize, float i
             viewDesc.dimension = wgpu::TextureViewDimension::e2DArray;
             textureViews_[b][i] = textureArray.CreateView(&viewDesc);
 
+            // We'll still create a "default" bind group, but it won't be used
+            // for distinct images if we do ephemeral bind groups in renderTiles.
             wgpu::BindGroupEntry bgEntries[3] = {};
             bgEntries[0].binding = 0;
             bgEntries[0].buffer = uniformBuffers_[b];
-            bgEntries[0].offset = 0;
-            bgEntries[0].size = 16;
+            bgEntries[0].size   = 16;
 
             bgEntries[1].binding = 1;
             bgEntries[1].textureView = textureViews_[b][i];
@@ -440,8 +462,6 @@ void ImageFlasher::update() {
     int backBuffer = 1 - frontBuffer;
 
     // ========== TIME-SLICED UPLOADS ==========
-    // If maxUploadsPerFrame_ == 0, we do unlimited (original behavior).
-    // Otherwise, we only upload up to maxUploadsPerFrame_ new images each frame.
     int uploadCount = 0;
     while (true) {
         if (maxUploadsPerFrame_ > 0 && uploadCount >= maxUploadsPerFrame_) {
@@ -465,54 +485,91 @@ void ImageFlasher::update() {
     }
 
     // ========== IMAGE SWITCH INTERVAL ==========
+    // We'll only update displayIndex_ once per ring buffer
+    // (not per tile). The per-tile difference is done in renderTiles(...).
     if (imagesInBuffer_[frontBuffer] > 0) {
         auto now = std::chrono::steady_clock::now();
         std::chrono::duration<float> elapsed = now - lastSwitchTime_[frontBuffer];
         if (elapsed.count() >= imageSwitchInterval_) {
             displayIndex_[frontBuffer] = (displayIndex_[frontBuffer] + 1) % imagesInBuffer_[frontBuffer];
             lastSwitchTime_[frontBuffer] = now;
-
-            uint32_t globalLayerIndex = displayIndex_[frontBuffer];
-            uint32_t layerIndexInTexture = globalLayerIndex % maxLayersPerArray;
-
-            struct UniformsData {
-                int32_t layerIndex;
-                int32_t padding[3];
-            };
-            UniformsData uniformsData = { (int32_t)layerIndexInTexture, {0,0,0} };
-            queue_.WriteBuffer(uniformBuffers_[frontBuffer], 0, &uniformsData, sizeof(UniformsData));
         }
     }
 }
 
-void ImageFlasher::render(wgpu::RenderPassEncoder& pass) {
+// This is where we do multiple draws, each referencing a different layer index.
+// We'll create a small ephemeral Uniform buffer & BindGroup for each tile so that
+// each tile can point to a different layer in our array textures.
+void ImageFlasher::renderTiles(wgpu::RenderPassEncoder& pass, int tileFactor) {
     int frontBuffer = bufferIndex_;
     if (imagesInBuffer_[frontBuffer] == 0) {
-        // No images in front buffer yet, just bind the 0th group
+        // No images in front buffer -> just a blank draw
         pass.SetBindGroup(0, bindGroups_[frontBuffer][0]);
+        pass.Draw(6);
         return;
     }
 
-    uint32_t globalLayerIndex = displayIndex_[frontBuffer] % ringBufferSize_;
-    uint32_t textureArrayIndex = globalLayerIndex / maxLayersPerArray;
-    pass.SetBindGroup(0, bindGroups_[frontBuffer][textureArrayIndex]);
+    int gridSize = 1 << tileFactor;  // 2^tileFactor
+    int totalTiles = gridSize * gridSize;
+    float tileWidth  = float(g_canvasWidth)  / float(gridSize);
+    float tileHeight = float(g_canvasHeight) / float(gridSize);
+
+    for (int i = 0; i < totalTiles; i++) {
+        // Distinct ring-buffer index for each tile
+        uint32_t layerIndex = (displayIndex_[frontBuffer] + i) % imagesInBuffer_[frontBuffer];
+        uint32_t arrayIndex = layerIndex / maxLayersPerArray;
+        uint32_t layerInTex = layerIndex % maxLayersPerArray;
+
+        // 1) Create a tiny ephemeral uniform buffer with (layerInTex)
+        struct UniformsData {
+            int32_t layerIndex;
+            int32_t padding[3];
+        } uniformsData = { (int32_t)layerInTex, {0,0,0} };
+
+        wgpu::BufferDescriptor bd = {};
+        bd.size  = sizeof(UniformsData);
+        bd.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+        wgpu::Buffer ephemeralUB = device_.CreateBuffer(&bd);
+
+        // Write the layer index into that ephemeral buffer
+        queue_.WriteBuffer(ephemeralUB, 0, &uniformsData, sizeof(uniformsData));
+
+        // 2) Create an ephemeral bind group referencing that buffer,
+        //    plus the correct 2D array, plus the sampler
+        wgpu::BindGroupEntry e[3] = {};
+        e[0].binding = 0;
+        e[0].buffer  = ephemeralUB;
+        e[0].size    = sizeof(UniformsData);
+
+        e[1].binding       = 1;
+        e[1].textureView   = textureViews_[frontBuffer][arrayIndex];
+
+        e[2].binding = 2;
+        e[2].sampler = sampler_;
+
+        wgpu::BindGroupDescriptor bgDesc = {};
+        bgDesc.layout     = bindGroupLayout_;
+        bgDesc.entryCount = 3;
+        bgDesc.entries    = e;
+        wgpu::BindGroup ephemeralBG = device_.CreateBindGroup(&bgDesc);
+
+        // 3) Set the viewport for this tile
+        float vx = (i % gridSize) * tileWidth;
+        float vy = (i / gridSize) * tileHeight;
+        pass.SetViewport(vx, vy, tileWidth, tileHeight, 0.0f, 1.0f);
+
+        // 4) Draw
+        pass.SetBindGroup(0, ephemeralBG);
+        pass.Draw(6);
+    }
+
+    // Reset the viewport to full if subsequent passes rely on it
+    pass.SetViewport(0, 0, float(g_canvasWidth), float(g_canvasHeight), 0.0f, 1.0f);
 }
 
 void ImageFlasher::swapBuffers() {
     bufferIndex_ = 1 - bufferIndex_;
     lastSwitchTime_[bufferIndex_] = std::chrono::steady_clock::now();
-
-    if (imagesInBuffer_[bufferIndex_] > 0) {
-        uint32_t globalLayerIndex = displayIndex_[bufferIndex_];
-        uint32_t layerIndexInTexture = globalLayerIndex % maxLayersPerArray;
-
-        struct UniformsData {
-            int32_t layerIndex;
-            int32_t padding[3];
-        };
-        UniformsData uniformsData = { (int32_t)layerIndexInTexture, {0,0,0} };
-        queue_.WriteBuffer(uniformBuffers_[bufferIndex_], 0, &uniformsData, sizeof(UniformsData));
-    }
 }
 
 // ========== Pipeline Creation & Rendering Setup ==========
@@ -528,6 +585,7 @@ wgpu::ShaderModule createShaderModule(const char* code) {
 }
 
 void createOffscreenTextures(uint32_t w, uint32_t h) {
+    // oldFrame
     {
         wgpu::TextureDescriptor desc = {};
         desc.size.width = w;
@@ -538,6 +596,7 @@ void createOffscreenTextures(uint32_t w, uint32_t h) {
         oldFrameTexture = device.CreateTexture(&desc);
         oldFrameView = oldFrameTexture.CreateView();
     }
+    // newFrame
     {
         wgpu::TextureDescriptor desc = {};
         desc.size.width = w;
@@ -548,6 +607,7 @@ void createOffscreenTextures(uint32_t w, uint32_t h) {
         newFrameTexture = device.CreateTexture(&desc);
         newFrameView = newFrameTexture.CreateView();
     }
+    // oldFrameTemp
     {
         wgpu::TextureDescriptor desc = {};
         desc.size.width = w;
@@ -822,7 +882,7 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
         // Record commands
         wgpu::CommandEncoder encoder = device.CreateCommandEncoder({});
 
-        // ========== Pass #1: newFrame pass ==========
+        // ========== Pass #1: newFrame pass (draw tiles) ==========
         {
             wgpu::RenderPassColorAttachment att = {};
             att.view = newFrameView;
@@ -836,8 +896,10 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
 
             wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&desc);
             pass.SetPipeline(pipelineImageFlasher);
-            imageFlasher->render(pass);
-            pass.Draw(6);
+
+            // Draw multiple tiles, each a distinct image:
+            imageFlasher->renderTiles(pass, g_tileFactor);
+
             pass.End();
         }
 
@@ -1015,7 +1077,7 @@ int getRingBufferSize() {
     return imageFlasher->getRingBufferSize();
 }
 
-// NEW: Set max uploads per frame (0 => unbounded)
+// Set max uploads per frame (0 => unbounded)
 EMSCRIPTEN_KEEPALIVE
 void setMaxUploadsPerFrame(int maxUploads) {
     if (imageFlasher) {

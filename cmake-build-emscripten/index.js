@@ -6724,55 +6724,61 @@ function _wgpuRenderPassEncoderSetPipeline(passId, pipelineId) {
  pass["setPipeline"](pipeline);
 }
 
+function _wgpuRenderPassEncoderSetViewport(passId, x, y, w, h, minDepth, maxDepth) {
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(52, 1, passId, x, y, w, h, minDepth, maxDepth);
+ var pass = WebGPU.mgrRenderPassEncoder.get(passId);
+ pass["setViewport"](x, y, w, h, minDepth, maxDepth);
+}
+
 function _wgpuRenderPipelineGetBindGroupLayout(pipelineId, groupIndex) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(52, 1, pipelineId, groupIndex);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(53, 1, pipelineId, groupIndex);
  var pipeline = WebGPU.mgrRenderPipeline.get(pipelineId);
  return WebGPU.mgrBindGroupLayout.create(pipeline["getBindGroupLayout"](groupIndex));
 }
 
 function _wgpuRenderPipelineRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(53, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(54, 1, id);
  return WebGPU.mgrRenderPipeline.release(id);
 }
 
 function _wgpuSamplerReference(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(54, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(55, 1, id);
  return WebGPU.mgrSampler.reference(id);
 }
 
 function _wgpuSamplerRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(55, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(56, 1, id);
  return WebGPU.mgrSampler.release(id);
 }
 
 function _wgpuShaderModuleReference(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(56, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(57, 1, id);
  return WebGPU.mgrShaderModule.reference(id);
 }
 
 function _wgpuShaderModuleRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(57, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(58, 1, id);
  return WebGPU.mgrShaderModule.release(id);
 }
 
 function _wgpuSurfaceRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(58, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(59, 1, id);
  return WebGPU.mgrSurface.release(id);
 }
 
 function _wgpuSwapChainGetCurrentTextureView(swapChainId) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(59, 1, swapChainId);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(60, 1, swapChainId);
  var context = WebGPU.mgrSwapChain.get(swapChainId);
  return WebGPU.mgrTextureView.create(context["getCurrentTexture"]()["createView"]());
 }
 
 function _wgpuSwapChainRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(60, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(61, 1, id);
  return WebGPU.mgrSwapChain.release(id);
 }
 
 function _wgpuTextureCreateView(textureId, descriptor) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(61, 1, textureId, descriptor);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(62, 1, textureId, descriptor);
  var desc;
  if (descriptor) {
   assert(descriptor);
@@ -6796,22 +6802,22 @@ function _wgpuTextureCreateView(textureId, descriptor) {
 }
 
 function _wgpuTextureReference(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(62, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(63, 1, id);
  return WebGPU.mgrTexture.reference(id);
 }
 
 function _wgpuTextureRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(63, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(64, 1, id);
  return WebGPU.mgrTexture.release(id);
 }
 
 function _wgpuTextureViewReference(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(64, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(65, 1, id);
  return WebGPU.mgrTextureView.reference(id);
 }
 
 function _wgpuTextureViewRelease(id) {
- if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(65, 1, id);
+ if (ENVIRONMENT_IS_PTHREAD) return proxyToMainThread(66, 1, id);
  return WebGPU.mgrTextureView.release(id);
 }
 
@@ -6938,7 +6944,7 @@ FS.staticInit();
 
 WebGPU.initManagers();
 
-var proxiedFunctionTable = [ _proc_exit, exitOnMainThread, pthreadCreateProxied, _emscripten_get_element_css_size, _environ_get, _environ_sizes_get, _fd_close, _fd_read, _fd_seek, _fd_write, _wgpuAdapterRelease, _wgpuAdapterRequestDevice, _wgpuBindGroupLayoutReference, _wgpuBindGroupLayoutRelease, _wgpuBindGroupReference, _wgpuBindGroupRelease, _wgpuBufferReference, _wgpuBufferRelease, _wgpuCommandBufferRelease, _wgpuCommandEncoderBeginRenderPass, _wgpuCommandEncoderFinish, _wgpuCommandEncoderRelease, _wgpuCreateInstance, _wgpuDeviceCreateBindGroup, _wgpuDeviceCreateBindGroupLayout, _wgpuDeviceCreateBuffer, _wgpuDeviceCreateCommandEncoder, _wgpuDeviceCreatePipelineLayout, _wgpuDeviceCreateRenderPipeline, generateRenderPipelineDesc, _wgpuDeviceCreateSampler, _wgpuDeviceCreateShaderModule, _wgpuDeviceCreateSwapChain, _wgpuDeviceCreateTexture, _wgpuDeviceGetQueue, _wgpuDeviceReference, _wgpuDeviceRelease, _wgpuDeviceSetUncapturedErrorCallback, _wgpuInstanceCreateSurface, _wgpuInstanceRequestAdapter, _wgpuPipelineLayoutReference, _wgpuPipelineLayoutRelease, _wgpuQuerySetRelease, _wgpuQueueRelease, _wgpuQueueSubmit, _wgpuQueueWriteBuffer, _wgpuQueueWriteTexture, _wgpuRenderPassEncoderDraw, _wgpuRenderPassEncoderEnd, _wgpuRenderPassEncoderRelease, _wgpuRenderPassEncoderSetBindGroup, _wgpuRenderPassEncoderSetPipeline, _wgpuRenderPipelineGetBindGroupLayout, _wgpuRenderPipelineRelease, _wgpuSamplerReference, _wgpuSamplerRelease, _wgpuShaderModuleReference, _wgpuShaderModuleRelease, _wgpuSurfaceRelease, _wgpuSwapChainGetCurrentTextureView, _wgpuSwapChainRelease, _wgpuTextureCreateView, _wgpuTextureReference, _wgpuTextureRelease, _wgpuTextureViewReference, _wgpuTextureViewRelease ];
+var proxiedFunctionTable = [ _proc_exit, exitOnMainThread, pthreadCreateProxied, _emscripten_get_element_css_size, _environ_get, _environ_sizes_get, _fd_close, _fd_read, _fd_seek, _fd_write, _wgpuAdapterRelease, _wgpuAdapterRequestDevice, _wgpuBindGroupLayoutReference, _wgpuBindGroupLayoutRelease, _wgpuBindGroupReference, _wgpuBindGroupRelease, _wgpuBufferReference, _wgpuBufferRelease, _wgpuCommandBufferRelease, _wgpuCommandEncoderBeginRenderPass, _wgpuCommandEncoderFinish, _wgpuCommandEncoderRelease, _wgpuCreateInstance, _wgpuDeviceCreateBindGroup, _wgpuDeviceCreateBindGroupLayout, _wgpuDeviceCreateBuffer, _wgpuDeviceCreateCommandEncoder, _wgpuDeviceCreatePipelineLayout, _wgpuDeviceCreateRenderPipeline, generateRenderPipelineDesc, _wgpuDeviceCreateSampler, _wgpuDeviceCreateShaderModule, _wgpuDeviceCreateSwapChain, _wgpuDeviceCreateTexture, _wgpuDeviceGetQueue, _wgpuDeviceReference, _wgpuDeviceRelease, _wgpuDeviceSetUncapturedErrorCallback, _wgpuInstanceCreateSurface, _wgpuInstanceRequestAdapter, _wgpuPipelineLayoutReference, _wgpuPipelineLayoutRelease, _wgpuQuerySetRelease, _wgpuQueueRelease, _wgpuQueueSubmit, _wgpuQueueWriteBuffer, _wgpuQueueWriteTexture, _wgpuRenderPassEncoderDraw, _wgpuRenderPassEncoderEnd, _wgpuRenderPassEncoderRelease, _wgpuRenderPassEncoderSetBindGroup, _wgpuRenderPassEncoderSetPipeline, _wgpuRenderPassEncoderSetViewport, _wgpuRenderPipelineGetBindGroupLayout, _wgpuRenderPipelineRelease, _wgpuSamplerReference, _wgpuSamplerRelease, _wgpuShaderModuleReference, _wgpuShaderModuleRelease, _wgpuSurfaceRelease, _wgpuSwapChainGetCurrentTextureView, _wgpuSwapChainRelease, _wgpuTextureCreateView, _wgpuTextureReference, _wgpuTextureRelease, _wgpuTextureViewReference, _wgpuTextureViewRelease ];
 
 function checkIncomingModuleAPI() {
  ignoredModuleProp("fetchSettings");
@@ -7047,6 +7053,7 @@ var wasmImports = {
  /** @export */ wgpuRenderPassEncoderRelease: _wgpuRenderPassEncoderRelease,
  /** @export */ wgpuRenderPassEncoderSetBindGroup: _wgpuRenderPassEncoderSetBindGroup,
  /** @export */ wgpuRenderPassEncoderSetPipeline: _wgpuRenderPassEncoderSetPipeline,
+ /** @export */ wgpuRenderPassEncoderSetViewport: _wgpuRenderPassEncoderSetViewport,
  /** @export */ wgpuRenderPipelineGetBindGroupLayout: _wgpuRenderPipelineGetBindGroupLayout,
  /** @export */ wgpuRenderPipelineRelease: _wgpuRenderPipelineRelease,
  /** @export */ wgpuSamplerReference: _wgpuSamplerReference,
@@ -7070,6 +7077,8 @@ var ___wasm_call_ctors = createExportWrapper("__wasm_call_ctors");
 var _free = Module["_free"] = createExportWrapper("free");
 
 var _malloc = Module["_malloc"] = createExportWrapper("malloc");
+
+var _setTileFactor = Module["_setTileFactor"] = createExportWrapper("setTileFactor");
 
 var _onImageReceived = Module["_onImageReceived"] = createExportWrapper("onImageReceived");
 
