@@ -9,6 +9,6 @@ CMake Deprecation Warning:
 
 
 -- Using toolchain file: /Users/estebanlanter/CLionProjects/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake
--- Configuring done (1.0s)
+-- Configuring done (0.9s)
 -- Generating done (0.0s)
 -- Build files have been written to: /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/cmake-build-emscripten

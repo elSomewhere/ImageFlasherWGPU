@@ -18,7 +18,9 @@ main.cpp
 #include <chrono>
 #include <cstdlib>
 #include <memory>
-#include <cmath>    // for fmod, etc.
+#include <cmath>       // for fmod, floor, etc.
+#include <algorithm>   // for std::swap
+// #include <random>   // Removed std::shuffle usage to avoid the compile error
 
 #include <emscripten.h>
 #include <emscripten/html5.h> // For emscripten_request_animation_frame_loop
@@ -26,20 +28,23 @@ main.cpp
 
 #include <webgpu/webgpu_cpp.h>
 
+// stb_image for decode
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 
+// stb_image_resize for resize
 #define STB_IMAGE_RESIZE_IMPLEMENTATION
 #include "stb_image_resize.h"
 
-// Error handler function
+// Error handler for WebGPU
 void HandleUncapturedError(WGPUErrorType type, const char* message, void* userdata) {
-    emscripten_log(EM_LOG_ERROR, "Uncaptured WebGPU Error (%d): %s", static_cast<int>(type), message);
+    emscripten_log(EM_LOG_ERROR, "Uncaptured WebGPU Error (%d): %s",
+                   static_cast<int>(type), message);
 }
 
 // ==================== SHADERS ====================
 
-// Vertex shader (unchanged)
+// A full-screen quad vertex shader
 const char* vertexShaderWGSL = R"(
 struct VSOutput {
     @builtin(position) Position : vec4<f32>,
@@ -71,7 +76,6 @@ fn vsMain(@builtin(vertex_index) vid : u32) -> VSOutput {
 }
 )";
 
-// Fragment shader for our tile-based ImageFlasher (unchanged logic)
 const char* imageFlasherFragmentWGSL = R"(
 struct Uniforms {
     layerIndex : i32
@@ -86,7 +90,6 @@ fn fsImage(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
 }
 )";
 
-// Fading shader (unchanged)
 const char* fadeFragmentWGSL = R"(
 @group(0) @binding(0) var oldFrame : texture_2d<f32>;
 @group(0) @binding(1) var newFrame : texture_2d<f32>;
@@ -107,12 +110,10 @@ fn fsFade(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
 }
 )";
 
-// PRESENT SHADER, modified for scrolling with wrapping
 const char* presentFragmentWGSL = R"(
 @group(0) @binding(0) var oldFrame : texture_2d<f32>;
 @group(0) @binding(1) var s : sampler;
 
-// New struct for scrolling offset
 struct ScrollParams {
     offset : vec2<f32>
 }
@@ -126,7 +127,6 @@ fn fsPresent(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
 }
 )";
 
-// Copy shader (unchanged)
 const char* copyFragmentWGSL = R"(
 @group(0) @binding(0) var srcTex : texture_2d<f32>;
 @group(0) @binding(1) var s : sampler;
@@ -137,7 +137,7 @@ fn fsCopy(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 }
 )";
 
-// ========== Global WebGPU objects ==========
+// ========== Global WebGPU objects & Buffers ==========
 
 wgpu::Device device;
 wgpu::Queue queue;
@@ -153,7 +153,6 @@ wgpu::RenderPipeline pipelineFade;
 wgpu::RenderPipeline pipelinePresent;
 wgpu::RenderPipeline pipelineCopy;
 
-// Buffers for fade factor, plus the new scroll offset buffer for present
 wgpu::Buffer fadeUniformBuffer;
 wgpu::Buffer scrollUniformBuffer;
 wgpu::Sampler commonSampler;
@@ -168,14 +167,13 @@ wgpu::Texture newFrameTexture;
 wgpu::TextureView newFrameView;
 
 // ========== Scroll parameters ==========
-// We'll scroll automatically in the final pass by offsetting uv
-// We store offsetX, offsetY, speedX, speedY, then update them each frame
+
 static float g_offsetX = 0.1f;
 static float g_offsetY = 0.0f;
 static float g_speedX  = 0.1f;
 static float g_speedY  = 0.0f;
 
-// ========== Data Structures ==========
+// ========== Data Structures & decode queue ==========
 
 struct ImageData {
     std::vector<uint8_t> pixels;
@@ -196,8 +194,7 @@ public:
 
     bool tryPop(T& value) {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (queue_.empty())
-            return false;
+        if (queue_.empty()) return false;
         value = std::move(queue_.front());
         queue_.pop();
         return true;
@@ -226,7 +223,7 @@ bool decodeAndResizeImage(const uint8_t* data, int length, ImageData& imageOut) 
         std::cerr << "Failed to decode image from memory\n";
         return false;
     }
-    const int desiredWidth = 512;
+    const int desiredWidth  = 512;
     const int desiredHeight = 512;
     std::vector<unsigned char> resized(desiredWidth * desiredHeight * 4);
     int result = stbir_resize_uint8(
@@ -238,17 +235,27 @@ bool decodeAndResizeImage(const uint8_t* data, int length, ImageData& imageOut) 
         std::cerr << "Failed to resize image.\n";
         return false;
     }
-    imageOut.width = desiredWidth;
+    imageOut.width  = desiredWidth;
     imageOut.height = desiredHeight;
     imageOut.pixels = std::move(resized);
     return true;
 }
 
-// Forward declarations
-EM_BOOL frame(double time, void* userData);
-void cleanup();
+// ========== Simple LCG-based shuffle to avoid std::shuffle ==========
 
-// ========== ImageFlasher Class (same as before, with multiple tiles) ==========
+static unsigned int myRandSeed = 12345u;
+static void customShuffle(std::vector<int>& arr) {
+    auto nextRand = []() {
+        myRandSeed = 1103515245u * myRandSeed + 12345u;
+        return (myRandSeed >> 16) & 0x7FFF;
+    };
+    for (int i = (int)arr.size() - 1; i > 0; i--) {
+        int j = nextRand() % (i + 1);
+        std::swap(arr[i], arr[j]);
+    }
+}
+
+// ========== ImageFlasher Class ==========
 
 class ImageFlasher {
 public:
@@ -260,10 +267,13 @@ public:
     void renderTiles(wgpu::RenderPassEncoder& pass, int tileFactor);
     void swapBuffers();
 
+    // pipeline layout
     wgpu::PipelineLayout getPipelineLayout() const { return pipelineLayout_; }
 
+    // controls the minimum time for each tile to switch
     void setSwitchInterval(float interval) { imageSwitchInterval_ = interval; }
 
+    // stats
     int getBufferUsage() const {
         int frontBuffer = bufferIndex_;
         return imagesInBuffer_[frontBuffer];
@@ -272,36 +282,53 @@ public:
         return ringBufferSize_;
     }
 
+    // decode queue
     ThreadSafeQueue<ImageData>& getImageQueue() { return imageQueue_; }
 
-    // time-sliced uploads
+    // limit how many images we upload from decode queue each frame
     void setMaxUploadsPerFrame(int maxUploads) {
-        maxUploadsPerFrame_ = maxUploads; // 0 => unbounded
+        maxUploadsPerFrame_ = maxUploads;
     }
+
+    // fraction of eligible tiles to actually switch each frame
+    void setRandomTileFraction(float frac) {
+        randomTileFraction_ = frac;
+        std::cout << "[INFO] randomTileFraction_ => " << randomTileFraction_ << "\n";
+    }
+
+    // new: set per-frame dt so we can accumulate time for each tile
+    void setDeltaTime(float dt) { dt_ = dt; }
 
 private:
     void uploadImage(const ImageData& image, int buffer);
+
     static const uint32_t maxLayersPerArray = 256;
 
     wgpu::Device device_;
     wgpu::Queue queue_;
     uint32_t ringBufferSize_;
+
     uint32_t textureWidth_ = 512;
     uint32_t textureHeight_ = 512;
 
     uint32_t writeIndex_[2];
-    uint32_t displayIndex_[2];
     uint32_t imagesInBuffer_[2];
 
+    // the user-provided minimum time between switches
     float imageSwitchInterval_;
-    std::chrono::steady_clock::time_point lastSwitchTime_[2];
+
+    // accumulate times per tile
+    float dt_ = 0.0f; // set each frame
+    // for each tile: how many ms have passed since last switch
+    std::vector<float> tileTimers_;
 
     wgpu::Sampler sampler_;
-    std::array<wgpu::Buffer, 2> uniformBuffers_; // not heavily used now, but leftover
+    std::array<wgpu::Buffer, 2> uniformBuffers_;
 
     wgpu::PipelineLayout pipelineLayout_;
     wgpu::BindGroupLayout bindGroupLayout_;
 
+    // ring buffer data
     std::array<std::vector<wgpu::Texture>, 2> textureArrays_;
     std::array<std::vector<wgpu::TextureView>, 2> textureViews_;
     std::array<std::vector<wgpu::BindGroup>, 2> bindGroups_;
@@ -310,11 +337,22 @@ private:
     int bufferIndex_;
 
     int maxUploadsPerFrame_ = 0;
+
+    // store the ring-buffer index for each tile
+    std::vector<uint32_t> tileIndices_;
+
+    // user wants partial random updates
+    float randomTileFraction_ = 0.5f;
+
+    // for legacy, not used much now
+    uint32_t displayIndex_[2];
+    std::chrono::steady_clock::time_point lastSwitchTime_[2];
 };
 
 ImageFlasher* imageFlasher = nullptr;
-static int g_tileFactor = 3; // how many tiles: 4^g_tileFactor
+static int g_tileFactor = 3; // default => 64 tiles
 
+// JS-Exposed
 extern "C" {
 EMSCRIPTEN_KEEPALIVE
 void setTileFactor(int x) {
@@ -322,131 +360,143 @@ void setTileFactor(int x) {
     g_tileFactor = x;
     std::cout << "[INFO] setTileFactor => " << g_tileFactor << std::endl;
 }
+
+EMSCRIPTEN_KEEPALIVE
+void setRandomTileFraction(float fraction) {
+    if (imageFlasher) {
+        imageFlasher->setRandomTileFraction(fraction);
+    }
+}
 }
 
-ImageFlasher::ImageFlasher(wgpu::Device device, uint32_t ringBufferSize, float imageSwitchInterval)
-        : device_(device),
-          queue_(device.GetQueue()),
-          ringBufferSize_(ringBufferSize),
+// constructor
+ImageFlasher::ImageFlasher(wgpu::Device dev, uint32_t ringSize, float switchInterval)
+        : device_(dev),
+          queue_(dev.GetQueue()),
+          ringBufferSize_(ringSize),
           bufferIndex_(0),
-          imageSwitchInterval_(imageSwitchInterval)
+          imageSwitchInterval_(switchInterval)
 {
     for (int b = 0; b < 2; ++b) {
         writeIndex_[b]     = 0;
-        displayIndex_[b]   = 0;
         imagesInBuffer_[b] = 0;
+        displayIndex_[b]   = 0;
         lastSwitchTime_[b] = std::chrono::steady_clock::now();
     }
 
-    uint32_t numTextureArrays = (ringBufferSize_ + maxLayersPerArray - 1) / maxLayersPerArray;
+    // create sampler
+    wgpu::SamplerDescriptor sd = {};
+    sd.addressModeU = wgpu::AddressMode::ClampToEdge;
+    sd.addressModeV = wgpu::AddressMode::ClampToEdge;
+    sd.magFilter    = wgpu::FilterMode::Linear;
+    sd.minFilter    = wgpu::FilterMode::Linear;
+    sampler_ = device_.CreateSampler(&sd);
 
-    wgpu::SamplerDescriptor samplerDesc = {};
-    samplerDesc.addressModeU = wgpu::AddressMode::ClampToEdge;
-    samplerDesc.addressModeV = wgpu::AddressMode::ClampToEdge;
-    samplerDesc.magFilter    = wgpu::FilterMode::Linear;
-    samplerDesc.minFilter    = wgpu::FilterMode::Linear;
-    sampler_ = device_.CreateSampler(&samplerDesc);
+    // create a bind group layout
+    wgpu::BindGroupLayoutEntry bgle[3] = {};
+    bgle[0].binding = 0;
+    bgle[0].visibility = wgpu::ShaderStage::Fragment;
+    bgle[0].buffer.type = wgpu::BufferBindingType::Uniform;
+    bgle[0].buffer.minBindingSize = 16;
 
-    wgpu::BindGroupLayoutEntry bglEntries[3] = {};
-    bglEntries[0].binding = 0;
-    bglEntries[0].visibility = wgpu::ShaderStage::Fragment;
-    bglEntries[0].buffer.type = wgpu::BufferBindingType::Uniform;
-    bglEntries[0].buffer.minBindingSize = 16;
+    bgle[1].binding = 1;
+    bgle[1].visibility = wgpu::ShaderStage::Fragment;
+    bgle[1].texture.sampleType = wgpu::TextureSampleType::Float;
+    bgle[1].texture.viewDimension = wgpu::TextureViewDimension::e2DArray;
 
-    bglEntries[1].binding = 1;
-    bglEntries[1].visibility = wgpu::ShaderStage::Fragment;
-    bglEntries[1].texture.sampleType = wgpu::TextureSampleType::Float;
-    bglEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2DArray;
-
-    bglEntries[2].binding = 2;
-    bglEntries[2].visibility = wgpu::ShaderStage::Fragment;
-    bglEntries[2].sampler.type = wgpu::SamplerBindingType::Filtering;
+    bgle[2].binding = 2;
+    bgle[2].visibility = wgpu::ShaderStage::Fragment;
+    bgle[2].sampler.type = wgpu::SamplerBindingType::Filtering;
 
     wgpu::BindGroupLayoutDescriptor bglDesc = {};
     bglDesc.entryCount = 3;
-    bglDesc.entries    = bglEntries;
+    bglDesc.entries    = bgle;
 
     bindGroupLayout_ = device_.CreateBindGroupLayout(&bglDesc);
 
-    wgpu::PipelineLayoutDescriptor plDesc = {};
-    plDesc.bindGroupLayoutCount = 1;
-    plDesc.bindGroupLayouts     = &bindGroupLayout_;
-    pipelineLayout_ = device_.CreatePipelineLayout(&plDesc);
+    wgpu::PipelineLayoutDescriptor pld = {};
+    pld.bindGroupLayoutCount = 1;
+    pld.bindGroupLayouts     = &bindGroupLayout_;
+    pipelineLayout_ = device_.CreatePipelineLayout(&pld);
 
-    // create two uniform buffers to keep old code's shape
-    for (int b = 0; b < 2; ++b) {
-        wgpu::BufferDescriptor uniformBufferDesc = {};
-        uniformBufferDesc.size  = 16;
-        uniformBufferDesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-        uniformBuffers_[b] = device_.CreateBuffer(&uniformBufferDesc);
+    // 2 uniform buffers (unused placeholder)
+    for (int b=0; b<2; b++){
+        wgpu::BufferDescriptor ubDesc = {};
+        ubDesc.size  = 16;
+        ubDesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+        uniformBuffers_[b] = device_.CreateBuffer(&ubDesc);
     }
 
-    for (int b = 0; b < 2; ++b) {
-        textureArrays_[b].resize(numTextureArrays);
-        textureViews_[b].resize(numTextureArrays);
-        bindGroups_[b].resize(numTextureArrays);
+    // create ring buffer textures
+    uint32_t numTexArrays = (ringBufferSize_ + maxLayersPerArray - 1) / maxLayersPerArray;
+    for (int b=0; b<2; b++){
+        textureArrays_[b].resize(numTexArrays);
+        textureViews_[b].resize(numTexArrays);
+        bindGroups_[b].resize(numTexArrays);
 
-        for (uint32_t i = 0; i < numTextureArrays; ++i) {
-            uint32_t layersInThisArray = maxLayersPerArray;
-            if (i == numTextureArrays - 1 && (ringBufferSize_ % maxLayersPerArray != 0)) {
-                layersInThisArray = ringBufferSize_ % maxLayersPerArray;
+        for (uint32_t i=0; i<numTexArrays; i++){
+            uint32_t layers = maxLayersPerArray;
+            if (i == numTexArrays - 1){
+                uint32_t leftover = ringSize % maxLayersPerArray;
+                if (leftover != 0) {
+                    layers = leftover;
+                }
             }
+            wgpu::TextureDescriptor td = {};
+            td.size.width  = textureWidth_;
+            td.size.height = textureHeight_;
+            td.size.depthOrArrayLayers = layers;
+            td.format = wgpu::TextureFormat::RGBA8Unorm;
+            td.usage  = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst;
+            wgpu::Texture texArray = device_.CreateTexture(&td);
+            textureArrays_[b][i] = texArray;
 
-            wgpu::TextureDescriptor textureDesc = {};
-            textureDesc.size.width  = textureWidth_;
-            textureDesc.size.height = textureHeight_;
-            textureDesc.size.depthOrArrayLayers = layersInThisArray;
-            textureDesc.format = wgpu::TextureFormat::RGBA8Unorm;
-            textureDesc.usage  = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst;
-            wgpu::Texture textureArray = device_.CreateTexture(&textureDesc);
-            textureArrays_[b][i] = textureArray;
+            wgpu::TextureViewDescriptor tvd = {};
+            tvd.dimension = wgpu::TextureViewDimension::e2DArray;
+            textureViews_[b][i] = texArray.CreateView(&tvd);
 
-            wgpu::TextureViewDescriptor viewDesc = {};
-            viewDesc.dimension = wgpu::TextureViewDimension::e2DArray;
-            textureViews_[b][i] = textureArray.CreateView(&viewDesc);
+            wgpu::BindGroupEntry e[3] = {};
+            e[0].binding = 0;
+            e[0].buffer  = uniformBuffers_[b];
+            e[0].size    = 16;
+            e[1].binding = 1;
+            e[1].textureView = textureViews_[b][i];
+            e[2].binding = 2;
+            e[2].sampler = sampler_;
 
-            wgpu::BindGroupEntry bgEntries[3] = {};
-            bgEntries[0].binding     = 0;
-            bgEntries[0].buffer      = uniformBuffers_[b];
-            bgEntries[0].size        = 16;
-            bgEntries[1].binding     = 1;
-            bgEntries[1].textureView = textureViews_[b][i];
-            bgEntries[2].binding     = 2;
-            bgEntries[2].sampler     = sampler_;
-
-            wgpu::BindGroupDescriptor bgDesc = {};
-            bgDesc.layout     = bindGroupLayout_;
-            bgDesc.entryCount = 3;
-            bgDesc.entries    = bgEntries;
-            bindGroups_[b][i] = device_.CreateBindGroup(&bgDesc);
+            wgpu::BindGroupDescriptor bgd = {};
+            bgd.layout     = bindGroupLayout_;
+            bgd.entryCount = 3;
+            bgd.entries    = e;
+            bindGroups_[b][i] = device_.CreateBindGroup(&bgd);
         }
     }
 }
 
-ImageFlasher::~ImageFlasher() {
-    std::cout << "ImageFlasher destroyed." << std::endl;
+// destructor
+ImageFlasher::~ImageFlasher(){
+    std::cout << "ImageFlasher destroyed.\n";
 }
 
-void ImageFlasher::pushImage(const ImageData& image) {
+void ImageFlasher::pushImage(const ImageData& image){
     imageQueue_.push(image);
 }
 
-void ImageFlasher::uploadImage(const ImageData& image, int buffer) {
-    if (imagesInBuffer_[buffer] == ringBufferSize_) {
-        // Overwrite oldest
+// uploads one image into ring buffer
+void ImageFlasher::uploadImage(const ImageData& image, int buffer){
+    if (imagesInBuffer_[buffer] == ringBufferSize_){
         displayIndex_[buffer] = (displayIndex_[buffer] + 1) % ringBufferSize_;
     } else {
         imagesInBuffer_[buffer]++;
     }
-
-    uint32_t globalLayerIndex  = writeIndex_[buffer];
-    uint32_t textureArrayIndex = globalLayerIndex / maxLayersPerArray;
-    uint32_t layerIndexInTex   = globalLayerIndex % maxLayersPerArray;
+    uint32_t idx = writeIndex_[buffer];
+    uint32_t arrIdx = idx / maxLayersPerArray;
+    uint32_t layer  = idx % maxLayersPerArray;
 
     wgpu::ImageCopyTexture dst = {};
-    dst.texture  = textureArrays_[buffer][textureArrayIndex];
+    dst.texture = textureArrays_[buffer][arrIdx];
     dst.mipLevel = 0;
-    dst.origin   = {0, 0, layerIndexInTex};
+    dst.origin   = {0, 0, layer};
     dst.aspect   = wgpu::TextureAspect::All;
 
     wgpu::TextureDataLayout layout = {};
@@ -464,61 +514,92 @@ void ImageFlasher::uploadImage(const ImageData& image, int buffer) {
     writeIndex_[buffer] = (writeIndex_[buffer] + 1) % ringBufferSize_;
 }
 
-void ImageFlasher::update() {
-    int frontBuffer = bufferIndex_;
-    int backBuffer  = 1 - frontBuffer;
+// check decode queue, possibly swap buffers
+void ImageFlasher::update(){
+    int front = bufferIndex_;
+    int back  = 1 - front;
 
-    // time-sliced uploads
     int uploadCount = 0;
-    while (true) {
+    while(true){
         if (maxUploadsPerFrame_ > 0 && uploadCount >= maxUploadsPerFrame_) {
             break;
         }
-        ImageData image;
-        if (!imageQueue_.tryPop(image)) {
+        ImageData img;
+        if(!imageQueue_.tryPop(img)){
             break;
         }
-        uploadImage(image, backBuffer);
+        uploadImage(img, back);
         uploadCount++;
     }
 
-    if (uploadCount > 0) {
+    if (uploadCount>0){
         swapBuffers();
-        frontBuffer = bufferIndex_;
-    }
-
-    // update displayIndex_ once per "switch interval"
-    if (imagesInBuffer_[frontBuffer] > 0) {
-        auto now = std::chrono::steady_clock::now();
-        std::chrono::duration<float> elapsed = now - lastSwitchTime_[frontBuffer];
-        if (elapsed.count() >= imageSwitchInterval_) {
-            displayIndex_[frontBuffer] = (displayIndex_[frontBuffer] + 1) % imagesInBuffer_[frontBuffer];
-            lastSwitchTime_[frontBuffer] = now;
-        }
+        front = bufferIndex_;
     }
 }
 
-void ImageFlasher::renderTiles(wgpu::RenderPassEncoder& pass, int tileFactor) {
-    int frontBuffer = bufferIndex_;
-    if (imagesInBuffer_[frontBuffer] == 0) {
-        // nothing
-        pass.SetBindGroup(0, bindGroups_[frontBuffer][0]);
+// The main rendering logic that increments tiles based on their timers
+void ImageFlasher::renderTiles(wgpu::RenderPassEncoder& pass, int tileFactor){
+    int front = bufferIndex_;
+    if (imagesInBuffer_[front] == 0) {
+        // no images
+        pass.SetBindGroup(0, bindGroups_[front][0]);
         pass.Draw(6);
         return;
     }
-    int gridSize   = 1 << tileFactor; // 2^tileFactor
+
+    int gridSize   = 1 << tileFactor;
     int totalTiles = gridSize * gridSize;
-    float tileW    = float(g_canvasWidth)  / float(gridSize);
-    float tileH    = float(g_canvasHeight) / float(gridSize);
 
-    for (int i = 0; i < totalTiles; i++) {
-        // distinct ring-buffer index
-        uint32_t layerIndex  = (displayIndex_[frontBuffer] + i) % imagesInBuffer_[frontBuffer];
-        uint32_t arrIndex    = layerIndex / maxLayersPerArray;
-        uint32_t layerInTex  = layerIndex % maxLayersPerArray;
+    // ensure tileIndices_ & tileTimers_ have correct size
+    if ((int)tileIndices_.size() != totalTiles){
+        tileIndices_.resize(totalTiles, 0);
+        tileTimers_.resize(totalTiles, 0.0f);
+        std::cout << "[INFO] tileIndices_ re-init to size " << totalTiles << "\n";
+    }
 
-        // ephemeral buffer for this tile
-        struct UniformsData {
+    // ========== 1) Accumulate dt into tileTimers_ ==========
+    for (int i=0; i<totalTiles; i++){
+        tileTimers_[i] += (dt_ * 0.001f);
+    }
+
+    // ========== 2) Build a list of "candidate" tiles whose timers exceed imageSwitchInterval_ ==========
+    std::vector<int> candidates;
+    candidates.reserve(totalTiles);
+    for (int i=0; i<totalTiles; i++){
+        if (tileTimers_[i] >= imageSwitchInterval_){
+            candidates.push_back(i);
+        }
+    }
+
+    // ========== 3) We only actually switch a fraction (randomTileFraction_) of these candidates  ==========
+    int candidateCount = (int)candidates.size();
+    int toSwitch = (int)std::floor(randomTileFraction_ * float(candidateCount));
+    if (toSwitch > candidateCount) toSwitch = candidateCount;
+
+    if (toSwitch>0){
+        // shuffle the candidate list
+        customShuffle(candidates);
+
+        // increment ring-buffer index for the first 'toSwitch' tiles, reset their timer
+        for (int i = 0; i < toSwitch; i++){
+            int tileId = candidates[i];
+            tileIndices_[tileId] = (tileIndices_[tileId] + 1) % imagesInBuffer_[front];
+            tileTimers_[tileId]  = 0.0f; // reset timer
+        }
+    }
+
+    // now draw each tile
+    float tileW = float(g_canvasWidth) / float(gridSize);
+    float tileH = float(g_canvasHeight) / float(gridSize);
+
+    for (int i=0; i<totalTiles; i++){
+        uint32_t layerIdx  = tileIndices_[i];
+        uint32_t arrIndex  = layerIdx / maxLayersPerArray;
+        uint32_t layerInTex= layerIdx % maxLayersPerArray;
+
+        // ephemeral uniform buffer for this tile
+        struct Uniforms {
             int32_t layerIndex;
             int32_t pad[3];
         } uniformsData = { (int32_t)layerInTex, {0,0,0} };
@@ -531,12 +612,11 @@ void ImageFlasher::renderTiles(wgpu::RenderPassEncoder& pass, int tileFactor) {
         queue_.WriteBuffer(ephemeralUB, 0, &uniformsData, sizeof(uniformsData));
 
         wgpu::BindGroupEntry e[3] = {};
-        e[0].binding = 0;
-        e[0].buffer  = ephemeralUB;
-        e[0].size    = sizeof(uniformsData);
-
+        e[0].binding     = 0;
+        e[0].buffer      = ephemeralUB;
+        e[0].size        = sizeof(uniformsData);
         e[1].binding     = 1;
-        e[1].textureView = textureViews_[frontBuffer][arrIndex];
+        e[1].textureView = textureViews_[front][arrIndex];
         e[2].binding     = 2;
         e[2].sampler     = sampler_;
 
@@ -546,7 +626,7 @@ void ImageFlasher::renderTiles(wgpu::RenderPassEncoder& pass, int tileFactor) {
         bgd.entries    = e;
         wgpu::BindGroup ephemeralBG = device_.CreateBindGroup(&bgd);
 
-        // set viewport
+        // viewport for tile i
         float vx = (i % gridSize) * tileW;
         float vy = (i / gridSize) * tileH;
         pass.SetViewport(vx, vy, tileW, tileH, 0.0f, 1.0f);
@@ -554,279 +634,49 @@ void ImageFlasher::renderTiles(wgpu::RenderPassEncoder& pass, int tileFactor) {
         pass.SetBindGroup(0, ephemeralBG);
         pass.Draw(6);
     }
+
     // restore full viewport
     pass.SetViewport(0, 0, float(g_canvasWidth), float(g_canvasHeight), 0.0f, 1.0f);
 }
 
-void ImageFlasher::swapBuffers() {
+void ImageFlasher::swapBuffers(){
     bufferIndex_ = 1 - bufferIndex_;
     lastSwitchTime_[bufferIndex_] = std::chrono::steady_clock::now();
 }
 
-// ========== Pipeline Creation & Rendering Setup ==========
+// ========== Forward declarations for pipeline creation ==========
 
-wgpu::ShaderModule createShaderModule(const char* code) {
-    wgpu::ShaderModuleWGSLDescriptor wgslDesc = {};
-    wgslDesc.code = code;
+wgpu::ShaderModule createShaderModule(const char* code);
+void createOffscreenTextures(uint32_t w, uint32_t h);
+void createPipelineCopy();
+void createPipelineImageFlasher();
+void createPipelineFade();
+void createPipelinePresent();
 
-    wgpu::ShaderModuleDescriptor desc = {};
-    desc.nextInChain = &wgslDesc;
+// ========== Additional code for the main loop, etc. ==========
 
-    return device.CreateShaderModule(&desc);
-}
-
-void createOffscreenTextures(uint32_t w, uint32_t h) {
-    // oldFrame
-    {
-        wgpu::TextureDescriptor desc = {};
-        desc.size.width  = w;
-        desc.size.height = h;
-        desc.size.depthOrArrayLayers = 1;
-        desc.format = wgpu::TextureFormat::RGBA8Unorm;
-        desc.usage  = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding;
-        oldFrameTexture = device.CreateTexture(&desc);
-        oldFrameView    = oldFrameTexture.CreateView();
-    }
-    // newFrame
-    {
-        wgpu::TextureDescriptor desc = {};
-        desc.size.width  = w;
-        desc.size.height = h;
-        desc.size.depthOrArrayLayers = 1;
-        desc.format = wgpu::TextureFormat::RGBA8Unorm;
-        desc.usage  = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding;
-        newFrameTexture = device.CreateTexture(&desc);
-        newFrameView    = newFrameTexture.CreateView();
-    }
-    // oldFrameTemp
-    {
-        wgpu::TextureDescriptor desc = {};
-        desc.size.width  = w;
-        desc.size.height = h;
-        desc.size.depthOrArrayLayers = 1;
-        desc.format = wgpu::TextureFormat::RGBA8Unorm;
-        desc.usage  = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding;
-        oldFrameTempTexture = device.CreateTexture(&desc);
-        oldFrameTempView    = oldFrameTempTexture.CreateView();
-    }
-}
-
-void createPipelineCopy() {
-    wgpu::ShaderModule vs = createShaderModule(vertexShaderWGSL);
-    wgpu::ShaderModule fs = createShaderModule(copyFragmentWGSL);
-
-    wgpu::BindGroupLayoutEntry bglEntries[2] = {};
-    bglEntries[0].binding    = 0;
-    bglEntries[0].visibility = wgpu::ShaderStage::Fragment;
-    bglEntries[0].texture.sampleType   = wgpu::TextureSampleType::Float;
-    bglEntries[0].texture.viewDimension= wgpu::TextureViewDimension::e2D;
-
-    bglEntries[1].binding    = 1;
-    bglEntries[1].visibility = wgpu::ShaderStage::Fragment;
-    bglEntries[1].sampler.type = wgpu::SamplerBindingType::Filtering;
-
-    wgpu::BindGroupLayoutDescriptor bglDesc = {};
-    bglDesc.entryCount = 2;
-    bglDesc.entries    = bglEntries;
-    wgpu::BindGroupLayout copyBGL = device.CreateBindGroupLayout(&bglDesc);
-
-    wgpu::PipelineLayoutDescriptor pld = {};
-    pld.bindGroupLayoutCount = 1;
-    pld.bindGroupLayouts     = &copyBGL;
-    wgpu::PipelineLayout layout = device.CreatePipelineLayout(&pld);
-
-    wgpu::RenderPipelineDescriptor desc = {};
-    desc.layout              = layout;
-    desc.vertex.module       = vs;
-    desc.vertex.entryPoint   = "vsMain";
-
-    wgpu::ColorTargetState ct = {};
-    ct.format    = wgpu::TextureFormat::RGBA8Unorm;
-    ct.writeMask = wgpu::ColorWriteMask::All;
-
-    wgpu::FragmentState fsState = {};
-    fsState.module             = fs;
-    fsState.entryPoint         = "fsCopy";
-    fsState.targetCount        = 1;
-    fsState.targets            = &ct;
-    desc.fragment              = &fsState;
-
-    desc.primitive.topology    = wgpu::PrimitiveTopology::TriangleList;
-    desc.primitive.cullMode    = wgpu::CullMode::None;
-    desc.multisample.count     = 1;
-
-    pipelineCopy = device.CreateRenderPipeline(&desc);
-}
-
-void createPipelineImageFlasher() {
-    wgpu::ShaderModule vs = createShaderModule(vertexShaderWGSL);
-    wgpu::ShaderModule fs = createShaderModule(imageFlasherFragmentWGSL);
-    wgpu::PipelineLayout layout = imageFlasher->getPipelineLayout();
-
-    wgpu::RenderPipelineDescriptor desc = {};
-    desc.layout              = layout;
-    desc.vertex.module       = vs;
-    desc.vertex.entryPoint   = "vsMain";
-
-    wgpu::ColorTargetState colorTarget = {};
-    colorTarget.format    = wgpu::TextureFormat::RGBA8Unorm;
-    colorTarget.writeMask = wgpu::ColorWriteMask::All;
-
-    wgpu::FragmentState fsState = {};
-    fsState.module             = fs;
-    fsState.entryPoint         = "fsImage";
-    fsState.targetCount        = 1;
-    fsState.targets            = &colorTarget;
-    desc.fragment              = &fsState;
-
-    desc.primitive.topology    = wgpu::PrimitiveTopology::TriangleList;
-    desc.primitive.cullMode    = wgpu::CullMode::None;
-    desc.multisample.count     = 1;
-
-    pipelineImageFlasher = device.CreateRenderPipeline(&desc);
-}
-
-void createPipelineFade() {
-    wgpu::ShaderModule vs = createShaderModule(vertexShaderWGSL);
-    wgpu::ShaderModule fs = createShaderModule(fadeFragmentWGSL);
-
-    wgpu::BindGroupLayoutEntry bglEntries[4] = {};
-    bglEntries[0].binding    = 0; // oldFrame
-    bglEntries[0].visibility = wgpu::ShaderStage::Fragment;
-    bglEntries[0].texture.sampleType     = wgpu::TextureSampleType::Float;
-    bglEntries[0].texture.viewDimension  = wgpu::TextureViewDimension::e2D;
-
-    bglEntries[1].binding    = 1; // newFrame
-    bglEntries[1].visibility = wgpu::ShaderStage::Fragment;
-    bglEntries[1].texture.sampleType     = wgpu::TextureSampleType::Float;
-    bglEntries[1].texture.viewDimension  = wgpu::TextureViewDimension::e2D;
-
-    bglEntries[2].binding    = 2; // fadeParam
-    bglEntries[2].visibility = wgpu::ShaderStage::Fragment;
-    bglEntries[2].buffer.type= wgpu::BufferBindingType::Uniform;
-
-    bglEntries[3].binding    = 3; // sampler
-    bglEntries[3].visibility = wgpu::ShaderStage::Fragment;
-    bglEntries[3].sampler.type = wgpu::SamplerBindingType::Filtering;
-
-    wgpu::BindGroupLayoutDescriptor bglDesc = {};
-    bglDesc.entryCount = 4;
-    bglDesc.entries    = bglEntries;
-    wgpu::BindGroupLayout fadeBGL = device.CreateBindGroupLayout(&bglDesc);
-
-    wgpu::PipelineLayoutDescriptor plDesc = {};
-    plDesc.bindGroupLayoutCount = 1;
-    plDesc.bindGroupLayouts     = &fadeBGL;
-    wgpu::PipelineLayout layout = device.CreatePipelineLayout(&plDesc);
-
-    wgpu::RenderPipelineDescriptor descP = {};
-    descP.layout              = layout;
-    descP.vertex.module       = vs;
-    descP.vertex.entryPoint   = "vsMain";
-
-    wgpu::ColorTargetState colorTarget = {};
-    colorTarget.format    = wgpu::TextureFormat::RGBA8Unorm;
-    colorTarget.writeMask = wgpu::ColorWriteMask::All;
-
-    wgpu::FragmentState fsState = {};
-    fsState.module             = fs;
-    fsState.entryPoint         = "fsFade";
-    fsState.targetCount        = 1;
-    fsState.targets            = &colorTarget;
-    descP.fragment             = &fsState;
-
-    descP.primitive.topology   = wgpu::PrimitiveTopology::TriangleList;
-    descP.primitive.cullMode   = wgpu::CullMode::None;
-    descP.multisample.count    = 1;
-
-    pipelineFade = device.CreateRenderPipeline(&descP);
-
-    // fadeUniformBuffer
-    {
-        wgpu::BufferDescriptor bd = {};
-        bd.size  = sizeof(float);
-        bd.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-        fadeUniformBuffer = device.CreateBuffer(&bd);
-
-        float fadeFactor = 0.5f; // default
-        queue.WriteBuffer(fadeUniformBuffer, 0, &fadeFactor, sizeof(fadeFactor));
-    }
-}
-
-void createPipelinePresent() {
-    wgpu::ShaderModule vs = createShaderModule(vertexShaderWGSL);
-    wgpu::ShaderModule fs = createShaderModule(presentFragmentWGSL);
-
-    // We now need 3 bindings:
-    //  (0) oldFrame texture_2d
-    //  (1) sampler
-    //  (2) scrollParam uniform
-    wgpu::BindGroupLayoutEntry bglEntries[3] = {};
-    bglEntries[0].binding    = 0; // oldFrame
-    bglEntries[0].visibility = wgpu::ShaderStage::Fragment;
-    bglEntries[0].texture.sampleType     = wgpu::TextureSampleType::Float;
-    bglEntries[0].texture.viewDimension  = wgpu::TextureViewDimension::e2D;
-
-    bglEntries[1].binding    = 1; // sampler
-    bglEntries[1].visibility = wgpu::ShaderStage::Fragment;
-    bglEntries[1].sampler.type = wgpu::SamplerBindingType::Filtering;
-
-    bglEntries[2].binding    = 2; // scrollParam
-    bglEntries[2].visibility = wgpu::ShaderStage::Fragment;
-    bglEntries[2].buffer.type= wgpu::BufferBindingType::Uniform;
-
-    wgpu::BindGroupLayoutDescriptor bglDesc = {};
-    bglDesc.entryCount = 3;
-    bglDesc.entries    = bglEntries;
-    wgpu::BindGroupLayout presentBGL = device.CreateBindGroupLayout(&bglDesc);
-
-    wgpu::PipelineLayoutDescriptor plDesc = {};
-    plDesc.bindGroupLayoutCount = 1;
-    plDesc.bindGroupLayouts     = &presentBGL;
-    wgpu::PipelineLayout layout = device.CreatePipelineLayout(&plDesc);
-
-    wgpu::RenderPipelineDescriptor descP = {};
-    descP.layout              = layout;
-    descP.vertex.module       = vs;
-    descP.vertex.entryPoint   = "vsMain";
-
-    wgpu::ColorTargetState ct = {};
-    ct.format    = swapChainFormat;
-    ct.writeMask = wgpu::ColorWriteMask::All;
-
-    wgpu::FragmentState fsState = {};
-    fsState.module             = fs;
-    fsState.entryPoint         = "fsPresent";
-    fsState.targetCount        = 1;
-    fsState.targets            = &ct;
-    descP.fragment             = &fsState;
-
-    descP.primitive.topology   = wgpu::PrimitiveTopology::TriangleList;
-    descP.primitive.cullMode   = wgpu::CullMode::None;
-    descP.multisample.count    = 1;
-
-    pipelinePresent = device.CreateRenderPipeline(&descP);
-
-    // create scrollUniformBuffer
-    {
-        wgpu::BufferDescriptor bd = {};
-        bd.size  = 2 * sizeof(float); // store offsetX, offsetY
-        bd.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-        scrollUniformBuffer = device.CreateBuffer(&bd);
-
-        // Initially zero offset
-        float init[2] = {0.0f, 0.0f};
-        queue.WriteBuffer(scrollUniformBuffer, 0, init, sizeof(init));
-    }
-}
-
-// ========== Debug for dropped frames ==========
 static double lastFrameTime = 0.0;
 static int droppedFrames = 0;
 static int frameCount = 0;
 
-// Forward declarations
-void updateScrolling(double dt);
+
+// ========== SCROLLING LOGIC ==========
+
+void updateScrolling(double dt) {
+    if (!scrollUniformBuffer) return;
+    g_offsetX += float(g_speedX * (dt * 0.001));
+    g_offsetY += float(g_speedY * (dt * 0.001));
+
+    // wrap in [0..1)
+    g_offsetX = std::fmod(g_offsetX, 1.0f);
+    if (g_offsetX < 0.f) g_offsetX += 1.f;
+    g_offsetY = std::fmod(g_offsetY, 1.0f);
+    if (g_offsetY < 0.f) g_offsetY += 1.f;
+
+    float data[2] = {g_offsetX, g_offsetY};
+    queue.WriteBuffer(scrollUniformBuffer, 0, data, sizeof(data));
+}
+
 
 extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
     wgpu::SwapChainDescriptor scDesc = {};
@@ -848,8 +698,8 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
     }
     swapChainFormat = scDesc.format;
 
-    // ring buffer: 1024 images max, switch interval = ~0.33s
-    imageFlasher = new ImageFlasher(device, 1024, 1.0f/3);
+    // create the ImageFlasher
+    imageFlasher = new ImageFlasher(device, 1024, /*imageSwitchInterval=*/1.0f/3);
 
     createPipelineImageFlasher();
     createPipelineFade();
@@ -857,6 +707,7 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
     createPipelineCopy();
     createOffscreenTextures(g_canvasWidth, g_canvasHeight);
 
+    // a sampler for passes like copy/present
     {
         wgpu::SamplerDescriptor sd = {};
         sd.minFilter       = wgpu::FilterMode::Linear;
@@ -866,31 +717,36 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
         commonSampler      = device.CreateSampler(&sd);
     }
 
+    // main render loop
     emscripten_request_animation_frame_loop([](double time, void*) {
-        // dropped-frame detection
-        if (lastFrameTime > 0) {
-            double dt = time - lastFrameTime;
-            if (dt > 25.0) {
-                droppedFrames++;
-            }
-            updateScrolling(dt); // update scrolling offset
-        }
+        double dt = (lastFrameTime > 0) ? (time - lastFrameTime) : 0.0;
         lastFrameTime = time;
         frameCount++;
+        if (dt > 25.0) {
+            droppedFrames++;
+        }
         if (frameCount % 60 == 0) {
             std::cout << "[DEBUG] Frame: " << frameCount
                       << " | Dropped: " << droppedFrames << std::endl;
         }
 
-        wgpu::TextureView swapChainView = swapChain.GetCurrentTextureView();
-        if(!swapChainView) return EM_TRUE;
+        // pass dt in ms to the flasher
+        if (imageFlasher) {
+            imageFlasher->setDeltaTime((float)dt);
+        }
 
-        // Update logic
+        // scroll offset
+        updateScrolling(dt);
+
+        wgpu::TextureView swapChainView = swapChain.GetCurrentTextureView();
+        if (!swapChainView) return EM_TRUE;
+
+        // update ring buffer from decode queue, etc
         imageFlasher->update();
 
         wgpu::CommandEncoder encoder = device.CreateCommandEncoder({});
 
-        // newFrame pass
+        // Pass #1: newFrame
         {
             wgpu::RenderPassColorAttachment att = {};
             att.view       = newFrameView;
@@ -904,19 +760,22 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
 
             wgpu::RenderPassEncoder pass = encoder.BeginRenderPass(&desc);
             pass.SetPipeline(pipelineImageFlasher);
+
+            // do the tile-based draws, with partial random updates
             imageFlasher->renderTiles(pass, g_tileFactor);
+
             pass.End();
         }
 
-        // copy oldFrame => oldFrameTemp
+        // Pass #2: copy oldFrame => oldFrameTemp
         {
             wgpu::BindGroup copyBG = [&]{
                 wgpu::BindGroupLayout bgl = pipelineCopy.GetBindGroupLayout(0);
                 wgpu::BindGroupEntry entries[2] = {};
-                entries[0].binding      = 0;
-                entries[0].textureView  = oldFrameView;
-                entries[1].binding      = 1;
-                entries[1].sampler      = commonSampler;
+                entries[0].binding     = 0;
+                entries[0].textureView = oldFrameView;
+                entries[1].binding     = 1;
+                entries[1].sampler     = commonSampler;
 
                 wgpu::BindGroupDescriptor bd = {};
                 bd.layout     = bgl;
@@ -942,20 +801,20 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
             pass.End();
         }
 
-        // fade pass => oldFrame
+        // Pass #3: fade => oldFrame
         {
             wgpu::BindGroup fadeBG = [&]{
                 wgpu::BindGroupLayout bgl = pipelineFade.GetBindGroupLayout(0);
                 wgpu::BindGroupEntry e[4] = {};
-                e[0].binding      = 0;
-                e[0].textureView  = oldFrameTempView;
-                e[1].binding      = 1;
-                e[1].textureView  = newFrameView;
-                e[2].binding      = 2;
-                e[2].buffer       = fadeUniformBuffer;
-                e[2].size         = sizeof(float);
-                e[3].binding      = 3;
-                e[3].sampler      = commonSampler;
+                e[0].binding     = 0; // oldFrame
+                e[0].textureView = oldFrameTempView;
+                e[1].binding     = 1; // newFrame
+                e[1].textureView = newFrameView;
+                e[2].binding     = 2; // fadeUniform
+                e[2].buffer      = fadeUniformBuffer;
+                e[2].size        = sizeof(float);
+                e[3].binding     = 3; // sampler
+                e[3].sampler     = commonSampler;
 
                 wgpu::BindGroupDescriptor bd = {};
                 bd.layout     = bgl;
@@ -981,9 +840,8 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
             pass.End();
         }
 
-        // present pass => swapChain
+        // Pass #4: present => swapChain
         {
-            // We'll create a bind group that includes (0) oldFrame, (1) sampler, (2) scrollUniformBuffer
             wgpu::BindGroup presentBG = [&] {
                 wgpu::BindGroupLayout bgl = pipelinePresent.GetBindGroupLayout(0);
                 wgpu::BindGroupEntry e[3] = {};
@@ -1019,6 +877,7 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
             pass.End();
         }
 
+        // submit
         wgpu::CommandBuffer cmd = encoder.Finish();
         queue.Submit(1, &cmd);
 
@@ -1026,28 +885,7 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
     }, nullptr);
 }
 
-// ========== SCROLLING LOGIC ==========
-// We'll update offsetX, offsetY each frame using speedX, speedY, then wrap them [0..1)
-void updateScrolling(double dt) {
-    if (!scrollUniformBuffer) return;
-
-    // increment offset
-    g_offsetX += float(g_speedX * (dt * 0.001));
-    g_offsetY += float(g_speedY * (dt * 0.001));
-
-    // wrap
-    g_offsetX = fmod(g_offsetX, 1.0f);
-    if (g_offsetX < 0.0f) g_offsetX += 1.0f;
-    g_offsetY = fmod(g_offsetY, 1.0f);
-    if (g_offsetY < 0.0f) g_offsetY += 1.0f;
-
-    // write to buffer
-    float data[2] = {g_offsetX, g_offsetY};
-    queue.WriteBuffer(scrollUniformBuffer, 0, data, sizeof(data));
-}
-
-// ========== Worker thread to decode & resize images ==========
-
+// decode worker
 std::atomic<bool> decodeWorkerRunning(true);
 std::thread decodeWorkerThread;
 
@@ -1067,6 +905,7 @@ void decodeWorkerFunc() {
     }
 }
 
+// EMSCRIPTEN exports
 extern "C" {
 EMSCRIPTEN_KEEPALIVE
 void onImageReceived(uint8_t* data, int length) {
@@ -1074,14 +913,12 @@ void onImageReceived(uint8_t* data, int length) {
     rawDataQueue.push(raw);
 }
 
-// fade factor
 EMSCRIPTEN_KEEPALIVE
 void setFadeFactor(float factor) {
     if (!fadeUniformBuffer) return;
     queue.WriteBuffer(fadeUniformBuffer, 0, &factor, sizeof(float));
 }
 
-// switch interval
 EMSCRIPTEN_KEEPALIVE
 void setImageSwitchInterval(float interval) {
     if (imageFlasher) {
@@ -1089,21 +926,18 @@ void setImageSwitchInterval(float interval) {
     }
 }
 
-// ring buffer usage
 EMSCRIPTEN_KEEPALIVE
 int getBufferUsage() {
     if (!imageFlasher) return 0;
     return imageFlasher->getBufferUsage();
 }
 
-// ring buffer size
 EMSCRIPTEN_KEEPALIVE
 int getRingBufferSize() {
     if (!imageFlasher) return 0;
     return imageFlasher->getRingBufferSize();
 }
 
-// time-sliced uploads
 EMSCRIPTEN_KEEPALIVE
 void setMaxUploadsPerFrame(int maxUploads) {
     if (imageFlasher) {
@@ -1111,7 +945,7 @@ void setMaxUploadsPerFrame(int maxUploads) {
     }
 }
 
-// NEW: set scrolling speed
+// set scrolling speed
 EMSCRIPTEN_KEEPALIVE
 void setScrollingSpeed(float sx, float sy) {
     g_speedX = sx;
@@ -1119,13 +953,11 @@ void setScrollingSpeed(float sx, float sy) {
     std::cout << "[INFO] setScrollingSpeed(" << sx << ", " << sy << ")\n";
 }
 
-// NEW: set immediate scrolling offset
+// set immediate scrolling offset
 EMSCRIPTEN_KEEPALIVE
 void setScrollingOffset(float ox, float oy) {
     g_offsetX = ox - std::floor(ox);
     g_offsetY = oy - std::floor(oy);
-
-    // Write immediately
     if (scrollUniformBuffer) {
         float data[2] = {g_offsetX, g_offsetY};
         queue.WriteBuffer(scrollUniformBuffer, 0, data, sizeof(data));
@@ -1144,7 +976,9 @@ void cleanup() {
     imageFlasher = nullptr;
 }
 
-void onDeviceRequestEnded(WGPURequestDeviceStatus status, WGPUDevice cDevice, const char* message, void* userdata) {
+// WebGPU device + adapter
+void onDeviceRequestEnded(WGPURequestDeviceStatus status, WGPUDevice cDevice,
+                          const char* message, void* userdata) {
     if (status == WGPURequestDeviceStatus_Success) {
         device = wgpu::Device::Acquire(cDevice);
         queue  = device.GetQueue();
@@ -1155,18 +989,21 @@ void onDeviceRequestEnded(WGPURequestDeviceStatus status, WGPUDevice cDevice, co
 
         decodeWorkerThread = std::thread(decodeWorkerFunc);
     } else {
-        std::cerr << "Failed to create device: " << (message ? message : "Unknown error") << std::endl;
+        std::cerr << "Failed to create device: "
+                  << (message ? message : "Unknown error") << std::endl;
     }
 }
 
-void onAdapterRequestEnded(WGPURequestAdapterStatus status, WGPUAdapter cAdapter, const char* message, void* userdata) {
+void onAdapterRequestEnded(WGPURequestAdapterStatus status, WGPUAdapter cAdapter,
+                           const char* message, void* userdata) {
     if (status == WGPURequestAdapterStatus_Success) {
         wgpu::Adapter adapter = wgpu::Adapter::Acquire(cAdapter);
         wgpu::DeviceDescriptor deviceDesc = {};
         deviceDesc.label = "My Device";
         adapter.RequestDevice(&deviceDesc, onDeviceRequestEnded, userdata);
     } else {
-        std::cerr << "Failed to get WebGPU adapter: " << (message ? message : "Unknown error") << std::endl;
+        std::cerr << "Failed to get WebGPU adapter: "
+                  << (message ? message : "Unknown error") << std::endl;
     }
 }
 
@@ -1195,6 +1032,258 @@ int main() {
 
     emscripten_exit_with_live_runtime();
     return 0;
+}
+
+// ========== Implementation of Pipeline Helpers ==========
+
+wgpu::ShaderModule createShaderModule(const char* code) {
+    wgpu::ShaderModuleWGSLDescriptor wgslDesc = {};
+    wgslDesc.code = code;
+
+    wgpu::ShaderModuleDescriptor desc = {};
+    desc.nextInChain = &wgslDesc;
+
+    return device.CreateShaderModule(&desc);
+}
+
+void createOffscreenTextures(uint32_t w, uint32_t h) {
+    {
+        wgpu::TextureDescriptor desc = {};
+        desc.size.width  = w;
+        desc.size.height = h;
+        desc.size.depthOrArrayLayers = 1;
+        desc.format = wgpu::TextureFormat::RGBA8Unorm;
+        desc.usage  = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding;
+        oldFrameTexture = device.CreateTexture(&desc);
+        oldFrameView    = oldFrameTexture.CreateView();
+    }
+    {
+        wgpu::TextureDescriptor desc = {};
+        desc.size.width  = w;
+        desc.size.height = h;
+        desc.size.depthOrArrayLayers = 1;
+        desc.format = wgpu::TextureFormat::RGBA8Unorm;
+        desc.usage  = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding;
+        newFrameTexture = device.CreateTexture(&desc);
+        newFrameView    = newFrameTexture.CreateView();
+    }
+    {
+        wgpu::TextureDescriptor desc = {};
+        desc.size.width  = w;
+        desc.size.height = h;
+        desc.size.depthOrArrayLayers = 1;
+        desc.format = wgpu::TextureFormat::RGBA8Unorm;
+        desc.usage  = wgpu::TextureUsage::RenderAttachment | wgpu::TextureUsage::TextureBinding;
+        oldFrameTempTexture = device.CreateTexture(&desc);
+        oldFrameTempView    = oldFrameTempTexture.CreateView();
+    }
+}
+
+void createPipelineCopy() {
+    wgpu::ShaderModule vs = createShaderModule(vertexShaderWGSL);
+    wgpu::ShaderModule fs = createShaderModule(copyFragmentWGSL);
+
+    wgpu::BindGroupLayoutEntry bglEntries[2] = {};
+    bglEntries[0].binding    = 0;
+    bglEntries[0].visibility = wgpu::ShaderStage::Fragment;
+    bglEntries[0].texture.sampleType    = wgpu::TextureSampleType::Float;
+    bglEntries[0].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+
+    bglEntries[1].binding    = 1;
+    bglEntries[1].visibility = wgpu::ShaderStage::Fragment;
+    bglEntries[1].sampler.type = wgpu::SamplerBindingType::Filtering;
+
+    wgpu::BindGroupLayoutDescriptor bglDesc = {};
+    bglDesc.entryCount = 2;
+    bglDesc.entries    = bglEntries;
+    wgpu::BindGroupLayout copyBGL = device.CreateBindGroupLayout(&bglDesc);
+
+    wgpu::PipelineLayoutDescriptor pld = {};
+    pld.bindGroupLayoutCount = 1;
+    pld.bindGroupLayouts     = &copyBGL;
+    wgpu::PipelineLayout layout = device.CreatePipelineLayout(&pld);
+
+    wgpu::RenderPipelineDescriptor desc = {};
+    desc.layout              = layout;
+    desc.vertex.module       = vs;
+    desc.vertex.entryPoint   = "vsMain";
+
+    wgpu::ColorTargetState ct = {};
+    ct.format    = wgpu::TextureFormat::RGBA8Unorm;
+    ct.writeMask = wgpu::ColorWriteMask::All;
+
+    wgpu::FragmentState fsState = {};
+    fsState.module      = fs;
+    fsState.entryPoint  = "fsCopy";
+    fsState.targetCount = 1;
+    fsState.targets     = &ct;
+    desc.fragment       = &fsState;
+
+    desc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
+    desc.primitive.cullMode = wgpu::CullMode::None;
+    desc.multisample.count  = 1;
+
+    pipelineCopy = device.CreateRenderPipeline(&desc);
+}
+
+void createPipelineImageFlasher() {
+    wgpu::ShaderModule vs = createShaderModule(vertexShaderWGSL);
+    wgpu::ShaderModule fs = createShaderModule(imageFlasherFragmentWGSL);
+    wgpu::PipelineLayout layout = imageFlasher->getPipelineLayout();
+
+    wgpu::RenderPipelineDescriptor desc = {};
+    desc.layout              = layout;
+    desc.vertex.module       = vs;
+    desc.vertex.entryPoint   = "vsMain";
+
+    wgpu::ColorTargetState colorTarget = {};
+    colorTarget.format    = wgpu::TextureFormat::RGBA8Unorm;
+    colorTarget.writeMask = wgpu::ColorWriteMask::All;
+
+    wgpu::FragmentState fsState = {};
+    fsState.module      = fs;
+    fsState.entryPoint  = "fsImage";
+    fsState.targetCount = 1;
+    fsState.targets     = &colorTarget;
+    desc.fragment       = &fsState;
+
+    desc.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
+    desc.primitive.cullMode = wgpu::CullMode::None;
+    desc.multisample.count  = 1;
+
+    pipelineImageFlasher = device.CreateRenderPipeline(&desc);
+}
+
+void createPipelineFade() {
+    wgpu::ShaderModule vs = createShaderModule(vertexShaderWGSL);
+    wgpu::ShaderModule fs = createShaderModule(fadeFragmentWGSL);
+
+    wgpu::BindGroupLayoutEntry bglEntries[4] = {};
+    bglEntries[0].binding    = 0;
+    bglEntries[0].visibility = wgpu::ShaderStage::Fragment;
+    bglEntries[0].texture.sampleType    = wgpu::TextureSampleType::Float;
+    bglEntries[0].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+
+    bglEntries[1].binding    = 1;
+    bglEntries[1].visibility = wgpu::ShaderStage::Fragment;
+    bglEntries[1].texture.sampleType    = wgpu::TextureSampleType::Float;
+    bglEntries[1].texture.viewDimension = wgpu::TextureViewDimension::e2D;
+
+    bglEntries[2].binding    = 2;
+    bglEntries[2].visibility = wgpu::ShaderStage::Fragment;
+    bglEntries[2].buffer.type= wgpu::BufferBindingType::Uniform;
+
+    bglEntries[3].binding    = 3;
+    bglEntries[3].visibility = wgpu::ShaderStage::Fragment;
+    bglEntries[3].sampler.type = wgpu::SamplerBindingType::Filtering;
+
+    wgpu::BindGroupLayoutDescriptor bglDesc = {};
+    bglDesc.entryCount = 4;
+    bglDesc.entries    = bglEntries;
+    wgpu::BindGroupLayout fadeBGL = device.CreateBindGroupLayout(&bglDesc);
+
+    wgpu::PipelineLayoutDescriptor plDesc = {};
+    plDesc.bindGroupLayoutCount = 1;
+    plDesc.bindGroupLayouts     = &fadeBGL;
+    wgpu::PipelineLayout layout = device.CreatePipelineLayout(&plDesc);
+
+    wgpu::RenderPipelineDescriptor descP = {};
+    descP.layout              = layout;
+    descP.vertex.module       = vs;
+    descP.vertex.entryPoint   = "vsMain";
+
+    wgpu::ColorTargetState colorTarget = {};
+    colorTarget.format    = wgpu::TextureFormat::RGBA8Unorm;
+    colorTarget.writeMask = wgpu::ColorWriteMask::All;
+
+    wgpu::FragmentState fsState = {};
+    fsState.module       = fs;
+    fsState.entryPoint   = "fsFade";
+    fsState.targetCount  = 1;
+    fsState.targets      = &colorTarget;
+    descP.fragment       = &fsState;
+
+    descP.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
+    descP.primitive.cullMode = wgpu::CullMode::None;
+    descP.multisample.count  = 1;
+
+    pipelineFade = device.CreateRenderPipeline(&descP);
+
+    // fadeUniformBuffer
+    {
+        wgpu::BufferDescriptor bd = {};
+        bd.size  = sizeof(float);
+        bd.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+        fadeUniformBuffer = device.CreateBuffer(&bd);
+
+        float fadeFactor = 0.5f;
+        queue.WriteBuffer(fadeUniformBuffer, 0, &fadeFactor, sizeof(fadeFactor));
+    }
+}
+
+void createPipelinePresent() {
+    wgpu::ShaderModule vs = createShaderModule(vertexShaderWGSL);
+    wgpu::ShaderModule fs = createShaderModule(presentFragmentWGSL);
+
+    wgpu::BindGroupLayoutEntry bglEntries[3] = {};
+    // oldFrame
+    bglEntries[0].binding    = 0;
+    bglEntries[0].visibility = wgpu::ShaderStage::Fragment;
+    bglEntries[0].texture.sampleType     = wgpu::TextureSampleType::Float;
+    bglEntries[0].texture.viewDimension  = wgpu::TextureViewDimension::e2D;
+
+    // sampler
+    bglEntries[1].binding    = 1;
+    bglEntries[1].visibility = wgpu::ShaderStage::Fragment;
+    bglEntries[1].sampler.type = wgpu::SamplerBindingType::Filtering;
+
+    // scrollParam
+    bglEntries[2].binding    = 2;
+    bglEntries[2].visibility = wgpu::ShaderStage::Fragment;
+    bglEntries[2].buffer.type= wgpu::BufferBindingType::Uniform;
+
+    wgpu::BindGroupLayoutDescriptor bglDesc = {};
+    bglDesc.entryCount = 3;
+    bglDesc.entries    = bglEntries;
+    wgpu::BindGroupLayout presentBGL = device.CreateBindGroupLayout(&bglDesc);
+
+    wgpu::PipelineLayoutDescriptor plDesc = {};
+    plDesc.bindGroupLayoutCount = 1;
+    plDesc.bindGroupLayouts     = &presentBGL;
+    wgpu::PipelineLayout layout = device.CreatePipelineLayout(&plDesc);
+
+    wgpu::RenderPipelineDescriptor descP = {};
+    descP.layout              = layout;
+    descP.vertex.module       = vs;
+    descP.vertex.entryPoint   = "vsMain";
+
+    wgpu::ColorTargetState ct = {};
+    ct.format    = swapChainFormat;
+    ct.writeMask = wgpu::ColorWriteMask::All;
+
+    wgpu::FragmentState fsState = {};
+    fsState.module      = fs;
+    fsState.entryPoint  = "fsPresent";
+    fsState.targetCount = 1;
+    fsState.targets     = &ct;
+    descP.fragment      = &fsState;
+
+    descP.primitive.topology = wgpu::PrimitiveTopology::TriangleList;
+    descP.primitive.cullMode = wgpu::CullMode::None;
+    descP.multisample.count  = 1;
+
+    pipelinePresent = device.CreateRenderPipeline(&descP);
+
+    // create scrollUniformBuffer
+    {
+        wgpu::BufferDescriptor bd = {};
+        bd.size  = 2 * sizeof(float);
+        bd.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+        scrollUniformBuffer = device.CreateBuffer(&bd);
+
+        float init[2] = {0.0f, 0.0f};
+        queue.WriteBuffer(scrollUniformBuffer, 0, init, sizeof(init));
+    }
 }
 
 
@@ -1455,7 +1544,7 @@ WS_PORT = 5010
 IMAGE_WIDTH = 512
 IMAGE_HEIGHT = 512
 
-SEND_DELAY = 0.5  # seconds between sends
+SEND_DELAY = 0.1  # seconds between sends
 
 
 async def image_sender(websocket):
@@ -1483,5 +1572,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
 

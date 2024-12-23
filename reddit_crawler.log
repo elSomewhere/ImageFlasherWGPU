@@ -1,0 +1,153 @@
+2024-12-23 00:45:13,017 - INFO - -------Starting the Reddit Crawler--------
+2024-12-23 00:45:15,100 - INFO - patching driver executable /Users/estebanlanter/Library/Application Support/undetected_chromedriver/undetected_chromedriver
+2024-12-23 00:45:18,601 - INFO - WebDriver initialized successfully.
+2024-12-23 00:45:19,432 - INFO - Starting the crawling process.
+2024-12-23 00:45:19,444 - INFO - 2 images found in the current page, starting the download process.
+2024-12-23 00:45:21,028 - INFO - Downloaded: v7oz9dkelf8e1.jpeg
+2024-12-23 00:45:24,282 - INFO - Downloaded: 1m9w53i2zg8e1.jpeg
+2024-12-23 00:45:26,292 - INFO - 5 gallery carousels found in the current page, processing images.
+2024-12-23 00:45:27,283 - INFO - Downloaded: yr432q4il88e1.jpg
+2024-12-23 00:45:29,535 - INFO - Downloaded: 2paiu5y83b8e1.jpg
+2024-12-23 00:45:31,804 - INFO - Downloaded: 6ih0d4kmxa8e1.jpg
+2024-12-23 00:45:34,292 - INFO - Downloaded: raw3x6tkla8e1.jpg
+2024-12-23 00:45:36,782 - INFO - Downloaded: y15ow2wrqa8e1.jpg
+2024-12-23 00:45:43,842 - INFO - 13 images found in the current page, starting the download process.
+2024-12-23 00:45:44,392 - INFO - Downloaded: c0aungxxtf8e1.jpeg
+2024-12-23 00:45:46,743 - INFO - Downloaded: vxt442vewe8e1.jpeg
+2024-12-23 00:45:49,044 - INFO - Downloaded: 6wt2uxnb588e1.jpeg
+2024-12-23 00:46:19,313 - INFO - -------Starting the Reddit Crawler--------
+2024-12-23 00:46:21,368 - INFO - patching driver executable /Users/estebanlanter/Library/Application Support/undetected_chromedriver/undetected_chromedriver
+2024-12-23 00:46:24,866 - INFO - WebDriver initialized successfully.
+2024-12-23 00:46:26,679 - INFO - Starting the crawling process.
+2024-12-23 00:46:26,688 - INFO - 2 images found in the current page, starting the download process.
+2024-12-23 00:46:26,716 - INFO - Image already exists: v7oz9dkelf8e1.jpeg, skipping.
+2024-12-23 00:46:28,747 - INFO - Image already exists: 1m9w53i2zg8e1.jpeg, skipping.
+2024-12-23 00:46:30,762 - INFO - 6 gallery carousels found in the current page, processing images.
+2024-12-23 00:46:30,773 - INFO - Image already exists: yr432q4il88e1.jpg, skipping.
+2024-12-23 00:46:32,808 - INFO - Image already exists: 2paiu5y83b8e1.jpg, skipping.
+2024-12-23 00:46:34,832 - INFO - Image already exists: 6ih0d4kmxa8e1.jpg, skipping.
+2024-12-23 00:46:36,864 - INFO - Image already exists: raw3x6tkla8e1.jpg, skipping.
+2024-12-23 00:46:38,903 - INFO - Image already exists: y15ow2wrqa8e1.jpg, skipping.
+2024-12-23 00:46:45,963 - INFO - 13 images found in the current page, starting the download process.
+2024-12-23 00:46:46,011 - INFO - Image already exists: c0aungxxtf8e1.jpeg, skipping.
+2024-12-23 00:46:48,035 - INFO - Image already exists: vxt442vewe8e1.jpeg, skipping.
+2024-12-23 00:46:50,069 - INFO - Image already exists: 6wt2uxnb588e1.jpeg, skipping.
+2024-12-23 00:46:52,459 - INFO - Downloaded: 6f0bj2husb8e1.jpeg
+2024-12-23 00:46:54,812 - INFO - Downloaded: zhley309ee8e1.jpeg
+2024-12-23 00:46:57,059 - INFO - Downloaded: g9oze8qb188e1.jpeg
+2024-12-23 00:46:59,493 - INFO - Downloaded: 4keqnsxdj88e1.jpeg
+2024-12-23 00:47:02,121 - INFO - Downloaded: x27jepwxd88e1.jpeg
+2024-12-23 00:47:04,830 - INFO - Downloaded: invtfqk0578e1.jpeg
+2024-12-23 00:47:07,058 - INFO - Downloaded: xv2h2kd6k58e1.jpeg
+2024-12-23 00:47:09,303 - INFO - Downloaded: 8hdt78u1b38e1.jpeg
+2024-12-23 00:47:11,317 - INFO - 15 gallery carousels found in the current page, processing images.
+2024-12-23 00:47:11,748 - INFO - Downloaded: un47u3i8198e1.jpg
+2024-12-23 00:47:13,929 - INFO - Downloaded: 42i8w3i8198e1.jpg
+2024-12-23 00:47:16,263 - INFO - Downloaded: tktk0okpl88e1.jpg
+2024-12-23 00:47:18,566 - INFO - Downloaded: dqzdhup0468e1.jpg
+2024-12-23 00:47:21,301 - INFO - Downloaded: k1aws76yx58e1.jpg
+2024-12-23 00:47:23,400 - INFO - Downloaded: udxun6l6e28e1.jpg
+2024-12-23 00:47:25,789 - INFO - Downloaded: owxubmjq748e1.jpg
+2024-12-23 00:47:28,472 - INFO - Downloaded: e9q14w83468e1.jpg
+2024-12-23 00:47:30,806 - INFO - Downloaded: un1ntq65a28e1.jpg
+2024-12-23 00:47:37,876 - INFO - 13 images found in the current page, starting the download process.
+2024-12-23 00:47:38,381 - INFO - Downloaded: 1yunbkeunz7e1.jpeg
+2024-12-23 00:47:40,770 - INFO - Downloaded: 8a13rpim8w7e1.jpeg
+2024-12-23 00:47:43,215 - INFO - Downloaded: 8swi42twl18e1.jpeg
+2024-12-23 00:47:45,304 - INFO - Downloaded: bvfgtvjgc18e1.jpeg
+2024-12-23 00:47:47,828 - INFO - Downloaded: rhxf85isb18e1.jpeg
+2024-12-23 00:47:50,393 - INFO - Downloaded: as8sbp08e08e1.jpeg
+2024-12-23 00:47:50,607 - INFO - Terminating the current session.
+2024-12-23 11:08:45,619 - INFO - -------Starting the Reddit Crawler--------
+2024-12-23 11:08:47,654 - INFO - patching driver executable /Users/estebanlanter/Library/Application Support/undetected_chromedriver/undetected_chromedriver
+2024-12-23 11:08:50,651 - INFO - WebDriver initialized successfully.
+2024-12-23 11:08:52,297 - INFO - Starting the crawling process.
+2024-12-23 11:08:52,306 - INFO - 1 images found in the current page, starting the download process.
+2024-12-23 11:08:53,229 - INFO - Downloaded: l7lqv3j3ti8e1.jpeg
+2024-12-23 11:08:55,239 - INFO - 5 gallery carousels found in the current page, processing images.
+2024-12-23 11:08:55,443 - INFO - Downloaded: qiy71jspjk8e1.jpg
+2024-12-23 11:08:57,708 - INFO - Downloaded: dv7fhispjk8e1.jpg
+2024-12-23 11:09:00,073 - INFO - Downloaded: psesmjspjk8e1.jpg
+2024-12-23 11:09:02,247 - INFO - Downloaded: eposddmc8j8e1.jpg
+2024-12-23 11:09:03,373 - INFO - Terminating the current session.
+2024-12-23 11:09:14,657 - INFO - -------Starting the Reddit Crawler--------
+2024-12-23 11:09:16,692 - INFO - patching driver executable /Users/estebanlanter/Library/Application Support/undetected_chromedriver/undetected_chromedriver
+2024-12-23 11:09:19,649 - INFO - WebDriver initialized successfully.
+2024-12-23 11:09:20,815 - INFO - Starting the crawling process.
+2024-12-23 11:09:20,829 - INFO - 1 images found in the current page, starting the download process.
+2024-12-23 11:09:20,910 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:20,916 - INFO - 1 gallery carousels found in the current page, processing images.
+2024-12-23 11:09:20,927 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:25,961 - INFO - 11 images found in the current page, starting the download process.
+2024-12-23 11:09:25,999 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:26,014 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:26,026 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:26,039 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:26,052 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:26,064 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:26,076 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:26,088 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:26,101 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:26,114 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:26,118 - INFO - 5 gallery carousels found in the current page, processing images.
+2024-12-23 11:09:26,129 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:26,136 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:26,142 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:26,149 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:26,155 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:31,181 - INFO - 15 images found in the current page, starting the download process.
+2024-12-23 11:09:31,362 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:31,379 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:31,395 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:31,410 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:31,426 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:31,431 - INFO - 13 gallery carousels found in the current page, processing images.
+2024-12-23 11:09:31,445 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:31,497 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:31,505 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:31,513 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:31,522 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:31,531 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:31,539 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:31,547 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:31,556 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:31,564 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:31,573 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:36,594 - INFO - 13 images found in the current page, starting the download process.
+2024-12-23 11:09:36,696 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:36,711 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:36,728 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:36,742 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:36,758 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:36,772 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:36,788 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:36,802 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:36,806 - INFO - 12 gallery carousels found in the current page, processing images.
+2024-12-23 11:09:36,818 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:36,829 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:36,887 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:36,899 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:36,911 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:36,923 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:36,930 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:36,937 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:36,944 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:41,960 - INFO - 18 images found in the current page, starting the download process.
+2024-12-23 11:09:42,128 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:42,144 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:42,159 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:42,175 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:42,190 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:42,205 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:42,220 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:42,236 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:42,251 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:42,266 - ERROR - Error processing image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:42,270 - INFO - 8 gallery carousels found in the current page, processing images.
+2024-12-23 11:09:42,360 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:42,367 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:42,374 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:42,381 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:42,388 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:42,395 - ERROR - Error processing carousel image: 'RedditCrawler' object has no attribute 'startswith'
+2024-12-23 11:09:44,129 - INFO - Terminating the current session.

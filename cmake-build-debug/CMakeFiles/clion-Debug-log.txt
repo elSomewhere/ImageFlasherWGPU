@@ -9,7 +9,7 @@ CMake Deprecation Warning:
 
 
 -- Using toolchain file: 
--- Configuring done (0.1s)
+-- Configuring done (0.0s)
 -- Generating done (0.0s)
 -- Build files have been written to: /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/cmake-build-debug
 
