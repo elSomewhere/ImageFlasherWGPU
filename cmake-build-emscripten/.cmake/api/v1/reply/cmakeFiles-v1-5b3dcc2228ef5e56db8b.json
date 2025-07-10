@@ -139,6 +139,12 @@
 			"path" : "app.js"
 		},
 		{
+			"path" : "index_ikeda.html"
+		},
+		{
+			"path" : "app_ikeda.js"
+		},
+		{
 			"path" : "serve.py"
 		}
 	],

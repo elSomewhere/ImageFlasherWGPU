@@ -107,7 +107,13 @@
 		<Unit filename="/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/app.js">
 			<Option virtualFolder="CMake Files\"/>
 		</Unit>
+		<Unit filename="/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/app_ikeda.js">
+			<Option virtualFolder="CMake Files\"/>
+		</Unit>
 		<Unit filename="/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/index.html">
+			<Option virtualFolder="CMake Files\"/>
+		</Unit>
+		<Unit filename="/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/index_ikeda.html">
 			<Option virtualFolder="CMake Files\"/>
 		</Unit>
 		<Unit filename="/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/serve.py">

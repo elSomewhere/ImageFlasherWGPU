@@ -217,27 +217,7 @@
 			},
 			{
 				"backtrace" : 2,
-				"fragment" : "DEMANGLE_SUPPORT=1",
-				"role" : "flags"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "-s",
-				"role" : "flags"
-			},
-			{
-				"backtrace" : 2,
 				"fragment" : "DISABLE_EXCEPTION_CATCHING=0",
-				"role" : "flags"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "-s",
-				"role" : "flags"
-			},
-			{
-				"backtrace" : 2,
-				"fragment" : "EXPORTED_FUNCTIONS=[_onImageReceived,_malloc,_free]",
 				"role" : "flags"
 			},
 			{

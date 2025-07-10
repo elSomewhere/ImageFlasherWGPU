@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Data.Matrix - Ikeda Information Overload</title>
+  <style>
+    /* Ryoji Ikeda inspired minimalist aesthetic */
+    html, body {
+      margin: 0;
+      padding: 0;
+      background-color: #000000;
+      color: #FFFFFF;
+      font-family: "Courier New", "Monaco", "Lucida Console", monospace;
+      overflow: hidden;
+      font-size: 10px;
+      line-height: 1.2;
+    }
+
+    /* Control panel - minimal and data-focused */
+    #controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.9);
+      border: 1px solid #FFFFFF;
+      padding: 8px;
+      z-index: 10;
+      width: 280px;
+      font-size: 9px;
+    }
+
+    /* Header styling */
+    .control-header {
+      font-size: 11px;
+      font-weight: bold;
+      margin-bottom: 8px;
+      text-align: center;
+      border-bottom: 1px solid #FFFFFF;
+      padding-bottom: 4px;
+    }
+
+    /* Section headers */
+    .section-header {
+      font-size: 10px;
+      font-weight: bold;
+      margin: 8px 0 4px 0;
+      color: #FFFFFF;
+      text-transform: uppercase;
+    }
+
+    /* Control rows */
+    .control-row {
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .control-row label {
+      width: 120px;
+      font-size: 9px;
+    }
+
+    .control-row input[type="range"] {
+      width: 80px;
+      height: 12px;
+      background: #000000;
+      border: 1px solid #FFFFFF;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    .control-row input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 8px;
+      height: 12px;
+      background: #FFFFFF;
+      cursor: pointer;
+    }
+
+    .control-row input[type="range"]::-moz-range-thumb {
+      width: 8px;
+      height: 12px;
+      background: #FFFFFF;
+      cursor: pointer;
+      border: none;
+    }
+
+    /* Select styling */
+    .control-row select {
+      width: 85px;
+      background: #000000;
+      color: #FFFFFF;
+      border: 1px solid #FFFFFF;
+      font-size: 9px;
+      font-family: inherit;
+    }
+
+    /* Value display */
+    .value-display {
+      width: 40px;
+      text-align: right;
+      font-size: 8px;
+      font-family: inherit;
+    }
+
+    /* Button styling */
+    button {
+      background: #000000;
+      color: #FFFFFF;
+      border: 1px solid #FFFFFF;
+      padding: 4px 8px;
+      font-size: 9px;
+      font-family: inherit;
+      cursor: pointer;
+      margin: 2px;
+    }
+
+    button:hover {
+      background: #FFFFFF;
+      color: #000000;
+    }
+
+    /* Data display area */
+    #dataDisplay {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(0, 0, 0, 0.9);
+      border: 1px solid #FFFFFF;
+      padding: 8px;
+      z-index: 10;
+      width: 200px;
+      font-size: 8px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .data-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 2px;
+    }
+
+    .data-label {
+      color: #FFFFFF;
+    }
+
+    .data-value {
+      color: #FFFFFF;
+      font-weight: bold;
+    }
+
+    /* Status bar */
+    #statusBar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 20px;
+      background: rgba(0, 0, 0, 0.9);
+      border-top: 1px solid #FFFFFF;
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+      font-size: 8px;
+      z-index: 10;
+    }
+
+    /* Canvas styling */
+    #canvas {
+      width: 100vw;
+      height: 100vh;
+      display: block;
+      background-color: #000000;
+    }
+
+    /* Keyboard shortcuts display */
+    #shortcuts {
+      position: absolute;
+      bottom: 25px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.9);
+      border: 1px solid #FFFFFF;
+      padding: 8px;
+      z-index: 10;
+      font-size: 8px;
+      width: 200px;
+    }
+
+    .shortcut-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 2px;
+    }
+
+    /* Mode indicator */
+    #modeIndicator {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 24px;
+      font-weight: bold;
+      color: #FFFFFF;
+      z-index: 15;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s;
+    }
+
+    /* Flashing animation for mode changes */
+    .mode-flash {
+      opacity: 1 !important;
+      animation: flash 1s ease-out;
+    }
+
+    @keyframes flash {
+      0% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+  </style>
+</head>
+<body>
+
+<div id="controls">
+  <div class="control-header">DATA.MATRIX</div>
+  
+  <!-- Ikeda Mode Selection -->
+  <div class="section-header">Visual Mode</div>
+  <div class="control-row">
+    <label>Mode:</label>
+    <select id="ikedaMode">
+      <option value="0">NORMAL</option>
+      <option value="1" selected>BLACK/WHITE</option>
+      <option value="2">GRID</option>
+      <option value="3">DATA</option>
+      <option value="4">BINARY</option>
+    </select>
+  </div>
+
+  <!-- Ikeda Parameters -->
+  <div class="section-header">Processing</div>
+  <div class="control-row">
+    <label>Threshold:</label>
+    <input type="range" id="ikedaThreshold" min="0" max="1" step="0.01" value="0.5">
+    <span id="thresholdValue" class="value-display">0.50</span>
+  </div>
+
+  <div class="control-row">
+    <label>Grid Size:</label>
+    <input type="range" id="ikedaGridSize" min="8" max="128" step="8" value="32">
+    <span id="gridSizeValue" class="value-display">32</span>
+  </div>
+
+  <div class="control-row">
+    <label>Data Intensity:</label>
+    <input type="range" id="ikedaDataIntensity" min="0" max="1" step="0.01" value="0.5">
+    <span id="dataIntensityValue" class="value-display">0.50</span>
+  </div>
+
+  <!-- Original Controls -->
+  <div class="section-header">Animation</div>
+  <div class="control-row">
+    <label>Fade Factor:</label>
+    <input type="range" id="fadeSlider" min="0" max="1" step="0.01" value="0.5">
+    <span id="fadeValue" class="value-display">0.50</span>
+  </div>
+
+  <div class="control-row">
+    <label>Switch Interval:</label>
+    <input type="range" id="switchSlider" min="0.01" max="5.0" step="0.1" value="0.33">
+    <span id="switchValue" class="value-display">0.33</span>
+  </div>
+
+  <div class="control-row">
+    <label>Tile Factor:</label>
+    <input type="range" id="tileSlider" min="0" max="4" step="1" value="3">
+    <span id="tileValue" class="value-display">3</span>
+  </div>
+
+  <!-- System Controls -->
+  <div class="section-header">System</div>
+  <div class="control-row">
+    <label>Max Uploads:</label>
+    <input type="range" id="uploadsSlider" min="0" max="10" step="1" value="0">
+    <span id="uploadsValue" class="value-display">0</span>
+  </div>
+
+  <div class="control-row">
+    <button id="updateBufferUsage">BUFFER STATUS</button>
+    <button id="resetSystem">RESET</button>
+  </div>
+
+  <div style="text-align: center; margin-top: 8px; font-size: 8px;">
+    <span id="bufferUsageLabel">Buffer: 0/0</span>
+  </div>
+</div>
+
+<!-- Real-time Data Display -->
+<div id="dataDisplay">
+  <div class="control-header">IMAGE.DATA</div>
+  <div class="data-row">
+    <span class="data-label">Luminance:</span>
+    <span class="data-value" id="dataLuminance">---</span>
+  </div>
+  <div class="data-row">
+    <span class="data-label">Entropy:</span>
+    <span class="data-value" id="dataEntropy">---</span>
+  </div>
+  <div class="data-row">
+    <span class="data-label">Variance:</span>
+    <span class="data-value" id="dataVariance">---</span>
+  </div>
+  <div class="data-row">
+    <span class="data-label">Edge Density:</span>
+    <span class="data-value" id="dataEdgeDensity">---</span>
+  </div>
+  <div class="data-row">
+    <span class="data-label">Frequency Ratio:</span>
+    <span class="data-value" id="dataFreqRatio">---</span>
+  </div>
+  <div class="data-row">
+    <span class="data-label">Compression:</span>
+    <span class="data-value" id="dataCompression">---</span>
+  </div>
+  <div class="data-row">
+    <span class="data-label">Timestamp:</span>
+    <span class="data-value" id="dataTimestamp">---</span>
+  </div>
+</div>
+
+<!-- Keyboard Shortcuts -->
+<div id="shortcuts">
+  <div class="control-header">SHORTCUTS</div>
+  <div class="shortcut-row">
+    <span>1-4:</span>
+    <span>MODE SELECT</span>
+  </div>
+  <div class="shortcut-row">
+    <span>B:</span>
+    <span>BLACK/WHITE</span>
+  </div>
+  <div class="shortcut-row">
+    <span>G:</span>
+    <span>GRID CYCLE</span>
+  </div>
+  <div class="shortcut-row">
+    <span>T:</span>
+    <span>THRESHOLD</span>
+  </div>
+  <div class="shortcut-row">
+    <span>R:</span>
+    <span>RESET</span>
+  </div>
+  <div class="shortcut-row">
+    <span>ESC:</span>
+    <span>FULLSCREEN</span>
+  </div>
+</div>
+
+<!-- Status Bar -->
+<div id="statusBar">
+  <span>FPS: <span id="fpsCounter">60</span></span>
+  <span style="margin-left: 20px;">MODE: <span id="currentMode">BLACK/WHITE</span></span>
+  <span style="margin-left: 20px;">IMAGES: <span id="imageCounter">0</span></span>
+  <span style="margin-left: auto;">DATA.MATRIX v1.0 | INFORMATION OVERLOAD</span>
+</div>
+
+<!-- Mode Change Indicator -->
+<div id="modeIndicator">BLACK/WHITE</div>
+
+<canvas id="canvas"></canvas>
+
+<!-- Emscripten-generated JS -->
+<script src="index.js"></script>
+
+<!-- Enhanced Ikeda Control Script -->
+<script src="app_ikeda.js"></script>
+
+</body>
+</html> 

@@ -150,6 +150,7 @@ wgpu::RenderPipeline pipelineCopy;
 
 wgpu::Buffer fadeUniformBuffer;
 wgpu::Buffer scrollUniformBuffer;
+wgpu::Buffer ikedaUniformBuffer;
 wgpu::Sampler commonSampler;
 
 wgpu::Texture oldFrameTempTexture;
@@ -167,6 +168,14 @@ static float g_offsetX = 0.1f;
 static float g_offsetY = 0.0f;
 static float g_speedX  = 0.1f;
 static float g_speedY  = 0.0f;
+
+// ========== Ikeda parameters ==========
+
+static int g_ikedaMode = 1;           // 0=normal, 1=blackwhite, 2=grid, 3=data, 4=binary
+static float g_ikedaThreshold = 0.5f; // black/white threshold
+static float g_ikedaGridSize = 32.0f; // grid quantization size
+static float g_ikedaDataIntensity = 0.5f; // data overlay intensity
+static float g_globalTime = 0.0f;     // global time for animations
 
 // ========== Data Structures & decode queue ==========
 
@@ -647,6 +656,7 @@ void createPipelineCopy();
 void createPipelineImageFlasher();
 void createPipelineFade();
 void createPipelinePresent();
+void updateIkedaUniforms();
 
 // ========== Additional code for the main loop, etc. ==========
 
@@ -729,6 +739,10 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
         if (imageFlasher) {
             imageFlasher->setDeltaTime((float)dt);
         }
+
+        // update global time for Ikeda animations
+        g_globalTime = (float)(time * 0.001); // convert to seconds
+        updateIkedaUniforms();
 
         // scroll offset
         updateScrolling(dt);
@@ -900,6 +914,33 @@ void decodeWorkerFunc() {
     }
 }
 
+// Helper function to update Ikeda uniforms
+void updateIkedaUniforms() {
+    if (!ikedaUniformBuffer) return;
+    
+    struct IkedaModeParams {
+        int32_t mode;
+        float threshold;
+        float gridSize;
+        float dataIntensity;
+        float time;
+        float canvasWidth;
+        float canvasHeight;
+        float padding;
+    } ikedaData;
+    
+    ikedaData.mode = g_ikedaMode;
+    ikedaData.threshold = g_ikedaThreshold;
+    ikedaData.gridSize = g_ikedaGridSize;
+    ikedaData.dataIntensity = g_ikedaDataIntensity;
+    ikedaData.time = g_globalTime;
+    ikedaData.canvasWidth = (float)g_canvasWidth;
+    ikedaData.canvasHeight = (float)g_canvasHeight;
+    ikedaData.padding = 0.0f;
+    
+    queue.WriteBuffer(ikedaUniformBuffer, 0, &ikedaData, sizeof(ikedaData));
+}
+
 // EMSCRIPTEN exports
 extern "C" {
 EMSCRIPTEN_KEEPALIVE
@@ -958,6 +999,57 @@ void setScrollingOffset(float ox, float oy) {
         queue.WriteBuffer(scrollUniformBuffer, 0, data, sizeof(data));
     }
     std::cout << "[INFO] setScrollingOffset(" << ox << ", " << oy << ")\n";
+}
+
+// ========== Ikeda Mode Functions ==========
+
+EMSCRIPTEN_KEEPALIVE
+void setIkedaMode(int mode) {
+    g_ikedaMode = mode;
+    updateIkedaUniforms();
+    std::cout << "[INFO] setIkedaMode(" << mode << ")\n";
+}
+
+EMSCRIPTEN_KEEPALIVE
+void setIkedaThreshold(float threshold) {
+    g_ikedaThreshold = threshold;
+    updateIkedaUniforms();
+    std::cout << "[INFO] setIkedaThreshold(" << threshold << ")\n";
+}
+
+EMSCRIPTEN_KEEPALIVE
+void setIkedaGridSize(float gridSize) {
+    g_ikedaGridSize = gridSize;
+    updateIkedaUniforms();
+    std::cout << "[INFO] setIkedaGridSize(" << gridSize << ")\n";
+}
+
+EMSCRIPTEN_KEEPALIVE
+void setIkedaDataIntensity(float intensity) {
+    g_ikedaDataIntensity = intensity;
+    updateIkedaUniforms();
+    std::cout << "[INFO] setIkedaDataIntensity(" << intensity << ")\n";
+}
+
+EMSCRIPTEN_KEEPALIVE
+float getImageAverageLuminance() {
+    // For now, return a placeholder value
+    // This would be filled with actual image analysis
+    return 127.5f;
+}
+
+EMSCRIPTEN_KEEPALIVE
+float getImageEntropy() {
+    // For now, return a placeholder value
+    // This would be filled with actual image analysis
+    return 4.5f;
+}
+
+EMSCRIPTEN_KEEPALIVE
+float getImageVariance() {
+    // For now, return a placeholder value
+    // This would be filled with actual image analysis
+    return 2500.0f;
 }
 
 } // extern "C"
@@ -1278,5 +1370,16 @@ void createPipelinePresent() {
 
         float init[2] = {0.0f, 0.0f};
         queue.WriteBuffer(scrollUniformBuffer, 0, init, sizeof(init));
+    }
+
+    // create ikedaUniformBuffer
+    {
+        wgpu::BufferDescriptor bd = {};
+        bd.size  = 8 * sizeof(float); // 1 int + 7 floats, aligned to 16 bytes
+        bd.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+        ikedaUniformBuffer = device.CreateBuffer(&bd);
+
+        // Initialize with default values
+        updateIkedaUniforms();
     }
 }

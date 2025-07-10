@@ -1142,7 +1142,7 @@
 					"value" : "If true, we are targeting Emscripten output."
 				}
 			],
-			"type" : "BOOL",
+			"type" : "INTERNAL",
 			"value" : "1"
 		},
 		{

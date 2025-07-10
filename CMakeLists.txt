@@ -46,12 +46,10 @@ target_link_options(index PRIVATE
         "SHELL:-s ASSERTIONS=2"
         "SHELL:-s SAFE_HEAP=1"
         "SHELL:-s STACK_OVERFLOW_CHECK=2"
-        "SHELL:-s DEMANGLE_SUPPORT=1"
 
         "SHELL:-s DISABLE_EXCEPTION_CATCHING=0"
 
-        # Add malloc and free here
-        "SHELL:-s EXPORTED_FUNCTIONS=['_onImageReceived','_malloc','_free']"
+        # Add malloc and free here - let EMSCRIPTEN_KEEPALIVE handle function exports
         "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','stackAlloc','stackSave','stackRestore']"
 
 #        "SHELL:-s USE_BOOST_HEADERS=1"
@@ -65,6 +63,8 @@ target_link_options(index PRIVATE
 # Copy HTML, JS, and Python files to the build directory
 configure_file(index.html index.html COPYONLY)
 configure_file(app.js app.js COPYONLY)
+configure_file(index_ikeda.html index_ikeda.html COPYONLY)
+configure_file(app_ikeda.js app_ikeda.js COPYONLY)
 configure_file(serve.py serve.py COPYONLY)
 
 # Conditionally set file system related flags

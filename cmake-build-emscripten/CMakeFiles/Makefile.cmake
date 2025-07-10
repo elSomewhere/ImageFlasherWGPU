@@ -26,10 +26,12 @@ set(CMAKE_MAKEFILE_DEPENDS
   "/Users/estebanlanter/CLionProjects/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake"
   "/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/CMakeLists.txt"
   "/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/app.js"
+  "/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/app_ikeda.js"
   "CMakeFiles/3.27.8/CMakeCCompiler.cmake"
   "CMakeFiles/3.27.8/CMakeCXXCompiler.cmake"
   "CMakeFiles/3.27.8/CMakeSystem.cmake"
   "/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/index.html"
+  "/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/index_ikeda.html"
   "/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/serve.py"
   )
 
@@ -43,6 +45,8 @@ set(CMAKE_MAKEFILE_OUTPUTS
 set(CMAKE_MAKEFILE_PRODUCTS
   "index.html"
   "app.js"
+  "index_ikeda.html"
+  "app_ikeda.js"
   "serve.py"
   "CMakeFiles/CMakeDirectoryInformation.cmake"
   )
