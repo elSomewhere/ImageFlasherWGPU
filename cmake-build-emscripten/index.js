@@ -7137,6 +7137,22 @@ var _setIkedaGridSize = Module["_setIkedaGridSize"] = createExportWrapper("setIk
 
 var _setIkedaDataIntensity = Module["_setIkedaDataIntensity"] = createExportWrapper("setIkedaDataIntensity", 1);
 
+var _setIkedaFrequency = Module["_setIkedaFrequency"] = createExportWrapper("setIkedaFrequency", 1);
+
+var _setIkedaPhaseShift = Module["_setIkedaPhaseShift"] = createExportWrapper("setIkedaPhaseShift", 1);
+
+var _setIkedaNoiseLevel = Module["_setIkedaNoiseLevel"] = createExportWrapper("setIkedaNoiseLevel", 1);
+
+var _setIkedaStripWidth = Module["_setIkedaStripWidth"] = createExportWrapper("setIkedaStripWidth", 1);
+
+var _setIkedaQuantumLevels = Module["_setIkedaQuantumLevels"] = createExportWrapper("setIkedaQuantumLevels", 1);
+
+var _setIkedaScanSpeed = Module["_setIkedaScanSpeed"] = createExportWrapper("setIkedaScanSpeed", 1);
+
+var _setIkedaMatrixScale = Module["_setIkedaMatrixScale"] = createExportWrapper("setIkedaMatrixScale", 1);
+
+var _setIkedaPulseRate = Module["_setIkedaPulseRate"] = createExportWrapper("setIkedaPulseRate", 1);
+
 var _getImageAverageLuminance = Module["_getImageAverageLuminance"] = createExportWrapper("getImageAverageLuminance", 0);
 
 var _getImageEntropy = Module["_getImageEntropy"] = createExportWrapper("getImageEntropy", 0);

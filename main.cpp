@@ -174,11 +174,21 @@ static float g_speedY  = 0.0f;
 
 // ========== Ikeda parameters ==========
 
-static int g_ikedaMode = 1;           // 0=normal, 1=blackwhite, 2=grid, 3=data, 4=binary
+static int g_ikedaMode = 1;           // 0=normal, 1=blackwhite, 2=grid, 3=data, 4=binary, 5-12=extended modes
 static float g_ikedaThreshold = 0.5f; // black/white threshold
 static float g_ikedaGridSize = 32.0f; // grid quantization size
 static float g_ikedaDataIntensity = 0.5f; // data overlay intensity
 static float g_globalTime = 0.0f;     // global time for animations
+
+// Extended Ikeda parameters for new modes
+static float g_ikedaFrequency = 3.0f;      // frequency analysis parameter
+static float g_ikedaPhaseShift = 1.57f;    // phase shift for wave patterns (π/2)
+static float g_ikedaNoiseLevel = 0.5f;     // noise generation level
+static float g_ikedaStripWidth = 0.05f;    // strip decomposition width
+static float g_ikedaQuantumLevels = 8.0f;  // quantum state levels
+static float g_ikedaScanSpeed = 0.5f;      // scanning speed
+static float g_ikedaMatrixScale = 1.0f;    // matrix transformation scale
+static float g_ikedaPulseRate = 2.0f;      // pulse rhythm rate
 
 // ========== Data Structures & decode queue ==========
 
@@ -400,7 +410,7 @@ ImageFlasher::ImageFlasher(wgpu::Device dev, uint32_t ringSize, float switchInte
     sampler_ = device_.CreateSampler(&sd);
 
     // create a bind group layout
-    wgpu::BindGroupLayoutEntry bgle[4] = {};
+    wgpu::BindGroupLayoutEntry bgle[4] = {};  // Restore 4 bindings for Ikeda shader
     bgle[0].binding = 0;
     bgle[0].visibility = wgpu::ShaderStage::Fragment;
     bgle[0].buffer.type = wgpu::BufferBindingType::Uniform;
@@ -418,10 +428,10 @@ ImageFlasher::ImageFlasher(wgpu::Device dev, uint32_t ringSize, float switchInte
     bgle[3].binding = 3;
     bgle[3].visibility = wgpu::ShaderStage::Fragment;
     bgle[3].buffer.type = wgpu::BufferBindingType::Uniform;
-    bgle[3].buffer.minBindingSize = 32; // IkedaModeParams struct size
+    bgle[3].buffer.minBindingSize = 64; // IkedaModeParams struct size
 
     wgpu::BindGroupLayoutDescriptor bglDesc = {};
-    bglDesc.entryCount = 4;
+    bglDesc.entryCount = 4;  // Restore 4 bindings for Ikeda shader
     bglDesc.entries    = bgle;
 
     bindGroupLayout_ = device_.CreateBindGroupLayout(&bglDesc);
@@ -467,7 +477,7 @@ ImageFlasher::ImageFlasher(wgpu::Device dev, uint32_t ringSize, float switchInte
             tvd.dimension = wgpu::TextureViewDimension::e2DArray;
             textureViews_[b][i] = texArray.CreateView(&tvd);
 
-            wgpu::BindGroupEntry e[4] = {};
+            wgpu::BindGroupEntry e[4] = {};  // Restore 4 entries for Ikeda shader
             e[0].binding = 0;
             e[0].buffer  = uniformBuffers_[b];
             e[0].size    = 16;
@@ -477,11 +487,11 @@ ImageFlasher::ImageFlasher(wgpu::Device dev, uint32_t ringSize, float switchInte
             e[2].sampler = sampler_;
             e[3].binding = 3;
             e[3].buffer  = ikedaUniformBuffer;
-            e[3].size    = 32; // IkedaModeParams struct size
+            e[3].size    = 64; // IkedaModeParams struct size
 
             wgpu::BindGroupDescriptor bgd = {};
             bgd.layout     = bindGroupLayout_;
-            bgd.entryCount = 4;
+            bgd.entryCount = 4;  // Restore 4 entries for Ikeda shader
             bgd.entries    = e;
             bindGroups_[b][i] = device_.CreateBindGroup(&bgd);
         }
@@ -626,7 +636,7 @@ void ImageFlasher::renderTiles(wgpu::RenderPassEncoder& pass, int tileFactor){
 
         queue_.WriteBuffer(ephemeralUB, 0, &uniformsData, sizeof(uniformsData));
 
-        wgpu::BindGroupEntry e[4] = {};
+        wgpu::BindGroupEntry e[4] = {};  // Restore 4 entries for Ikeda shader
         e[0].binding     = 0;
         e[0].buffer      = ephemeralUB;
         e[0].size        = sizeof(uniformsData);
@@ -636,11 +646,11 @@ void ImageFlasher::renderTiles(wgpu::RenderPassEncoder& pass, int tileFactor){
         e[2].sampler     = sampler_;
         e[3].binding     = 3;
         e[3].buffer      = ikedaUniformBuffer;
-        e[3].size        = 32; // IkedaModeParams struct size
+        e[3].size        = 64; // IkedaModeParams struct size
 
         wgpu::BindGroupDescriptor bgd = {};
         bgd.layout     = bindGroupLayout_;
-        bgd.entryCount = 4;
+        bgd.entryCount = 4;  // Restore 4 entries for Ikeda shader
         bgd.entries    = e;
         wgpu::BindGroup ephemeralBG = device_.CreateBindGroup(&bgd);
 
@@ -720,7 +730,7 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
     // Create ikedaUniformBuffer before ImageFlasher constructor
     {
         wgpu::BufferDescriptor bd = {};
-        bd.size  = 8 * sizeof(float); // 1 int + 7 floats, aligned to 16 bytes
+        bd.size  = 16 * sizeof(float); // 1 int + 15 floats = 64 bytes
         bd.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
         ikedaUniformBuffer = device.CreateBuffer(&bd);
     }
@@ -848,7 +858,7 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
                 e[3].sampler     = commonSampler;
                 e[4].binding     = 4; // ikeda uniform
                 e[4].buffer      = ikedaUniformBuffer;
-                e[4].size        = 32; // IkedaModeParams struct size
+                e[4].size        = 64; // IkedaModeParams struct size
 
                 wgpu::BindGroupDescriptor bd = {};
                 bd.layout     = bgl;
@@ -888,7 +898,7 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
                 e[2].size         = 2*sizeof(float);
                 e[3].binding      = 3;
                 e[3].buffer       = ikedaUniformBuffer;
-                e[3].size         = 32; // IkedaModeParams struct size
+                e[3].size         = 64; // IkedaModeParams struct size
 
                 wgpu::BindGroupDescriptor bd = {};
                 bd.layout     = bgl;
@@ -954,7 +964,18 @@ void updateIkedaUniforms() {
         float time;
         float canvasWidth;
         float canvasHeight;
-        float padding;
+        
+        // Extended parameters to match shader exactly
+        float frequency;
+        float phaseShift;
+        float noiseLevel;
+        float stripWidth;
+        float quantumLevels;
+        float scanSpeed;
+        float matrixScale;
+        float pulseRate;
+        // No explicit padding - GPU handles 16-byte alignment automatically
+        // Struct: 60 bytes, Buffer: 64 bytes (GPU-aligned)
     } ikedaData;
     
     ikedaData.mode = g_ikedaMode;
@@ -964,7 +985,16 @@ void updateIkedaUniforms() {
     ikedaData.time = g_globalTime;
     ikedaData.canvasWidth = (float)g_canvasWidth;
     ikedaData.canvasHeight = (float)g_canvasHeight;
-    ikedaData.padding = 0.0f;
+    
+    // Set extended parameters
+    ikedaData.frequency = g_ikedaFrequency;
+    ikedaData.phaseShift = g_ikedaPhaseShift;
+    ikedaData.noiseLevel = g_ikedaNoiseLevel;
+    ikedaData.stripWidth = g_ikedaStripWidth;
+    ikedaData.quantumLevels = g_ikedaQuantumLevels;
+    ikedaData.scanSpeed = g_ikedaScanSpeed;
+    ikedaData.matrixScale = g_ikedaMatrixScale;
+    ikedaData.pulseRate = g_ikedaPulseRate;
     
     queue.WriteBuffer(ikedaUniformBuffer, 0, &ikedaData, sizeof(ikedaData));
 }
@@ -1057,6 +1087,64 @@ void setIkedaDataIntensity(float intensity) {
     g_ikedaDataIntensity = intensity;
     updateIkedaUniforms();
     std::cout << "[INFO] setIkedaDataIntensity(" << intensity << ")\n";
+}
+
+// ========== Extended Ikeda Mode Functions ==========
+
+EMSCRIPTEN_KEEPALIVE
+void setIkedaFrequency(float frequency) {
+    g_ikedaFrequency = frequency;
+    updateIkedaUniforms();
+    std::cout << "[INFO] setIkedaFrequency(" << frequency << ")\n";
+}
+
+EMSCRIPTEN_KEEPALIVE
+void setIkedaPhaseShift(float phaseShift) {
+    g_ikedaPhaseShift = phaseShift;
+    updateIkedaUniforms();
+    std::cout << "[INFO] setIkedaPhaseShift(" << phaseShift << ")\n";
+}
+
+EMSCRIPTEN_KEEPALIVE
+void setIkedaNoiseLevel(float noiseLevel) {
+    g_ikedaNoiseLevel = noiseLevel;
+    updateIkedaUniforms();
+    std::cout << "[INFO] setIkedaNoiseLevel(" << noiseLevel << ")\n";
+}
+
+EMSCRIPTEN_KEEPALIVE
+void setIkedaStripWidth(float stripWidth) {
+    g_ikedaStripWidth = stripWidth;
+    updateIkedaUniforms();
+    std::cout << "[INFO] setIkedaStripWidth(" << stripWidth << ")\n";
+}
+
+EMSCRIPTEN_KEEPALIVE
+void setIkedaQuantumLevels(float quantumLevels) {
+    g_ikedaQuantumLevels = quantumLevels;
+    updateIkedaUniforms();
+    std::cout << "[INFO] setIkedaQuantumLevels(" << quantumLevels << ")\n";
+}
+
+EMSCRIPTEN_KEEPALIVE
+void setIkedaScanSpeed(float scanSpeed) {
+    g_ikedaScanSpeed = scanSpeed;
+    updateIkedaUniforms();
+    std::cout << "[INFO] setIkedaScanSpeed(" << scanSpeed << ")\n";
+}
+
+EMSCRIPTEN_KEEPALIVE
+void setIkedaMatrixScale(float matrixScale) {
+    g_ikedaMatrixScale = matrixScale;
+    updateIkedaUniforms();
+    std::cout << "[INFO] setIkedaMatrixScale(" << matrixScale << ")\n";
+}
+
+EMSCRIPTEN_KEEPALIVE
+void setIkedaPulseRate(float pulseRate) {
+    g_ikedaPulseRate = pulseRate;
+    updateIkedaUniforms();
+    std::cout << "[INFO] setIkedaPulseRate(" << pulseRate << ")\n";
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -1157,6 +1245,7 @@ wgpu::ShaderModule createShaderModule(const char* code) {
 
     wgpu::ShaderModuleDescriptor desc = {};
     desc.nextInChain = &wgslDesc;
+    desc.label = "Shader Module";
 
     return device.CreateShaderModule(&desc);
 }
@@ -1295,7 +1384,7 @@ void createPipelineFade() {
     bglEntries[4].binding    = 4;
     bglEntries[4].visibility = wgpu::ShaderStage::Fragment;
     bglEntries[4].buffer.type= wgpu::BufferBindingType::Uniform;
-    bglEntries[4].buffer.minBindingSize = 32; // IkedaModeParams struct size
+    bglEntries[4].buffer.minBindingSize = 64; // IkedaModeParams struct size
 
     wgpu::BindGroupLayoutDescriptor bglDesc = {};
     bglDesc.entryCount = 5;
@@ -1366,7 +1455,7 @@ void createPipelinePresent() {
     bglEntries[3].binding    = 3;
     bglEntries[3].visibility = wgpu::ShaderStage::Fragment;
     bglEntries[3].buffer.type= wgpu::BufferBindingType::Uniform;
-    bglEntries[3].buffer.minBindingSize = 32; // IkedaModeParams struct size
+    bglEntries[3].buffer.minBindingSize = 64; // IkedaModeParams struct size
 
     wgpu::BindGroupLayoutDescriptor bglDesc = {};
     bglDesc.entryCount = 4;

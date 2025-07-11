@@ -1,24 +1,37 @@
 // Enhanced Ikeda-Inspired Shaders for ImageFlasherWGPU
-// Phase 1: Black & White conversion, Grid quantization, Data visualization
+// Extended Phase 2: Advanced Data Visualization Modes
 // 
-// Bug Fixes Applied:
-// - Grid Mode: Fixed inverted grid line density (larger grid size = fewer lines)
-// - Data Mode: Replaced harsh max() with smooth blending to prevent sudden transitions
-// - All Modes: Reduced flickering and improved visual stability
-// - Binary Mode: Better scanline resolution and bit extraction stability
+// New Modes Added:
+// - Mode 5: FREQUENCY - Spectral analysis and frequency domain visualization
+// - Mode 6: SCAN - Progressive scanning patterns inspired by "superposition"
+// - Mode 7: MATRIX - Mathematical matrix operations and transformations
+// - Mode 8: PULSE - Temporal rhythm and pulse patterns
+// - Mode 9: NOISE - Random data generation and pattern analysis
+// - Mode 10: STRIP - Horizontal/vertical strip decomposition
+// - Mode 11: PHASE - Phase relationships and interference patterns
+// - Mode 12: QUANTUM - Quantized levels and discrete data states
 
-// ==================== IKEDA MODE UNIFORMS ====================
+// ==================== ENHANCED IKEDA MODE UNIFORMS ====================
 
 const char* ikedaModeUniformWGSL = R"(
 struct IkedaModeParams {
-    mode : i32,              // 0=normal, 1=blackwhite, 2=grid, 3=data, 4=binary
+    mode : i32,              // 0-12: visual modes
     threshold : f32,         // black/white threshold
     gridSize : f32,          // grid quantization size
     dataIntensity : f32,     // data overlay intensity
     time : f32,              // global time for animations
     canvasWidth : f32,       // for precise calculations
     canvasHeight : f32,      // for precise calculations
-    padding : f32            // alignment
+    
+    // New extended parameters
+    frequency : f32,         // frequency analysis parameter
+    phaseShift : f32,        // phase shift for wave patterns
+    noiseLevel : f32,        // noise generation level
+    stripWidth : f32,        // strip decomposition width
+    quantumLevels : f32,     // quantum state levels
+    scanSpeed : f32,         // scanning speed
+    matrixScale : f32,       // matrix transformation scale
+    pulseRate : f32          // pulse rhythm rate
 }
 )";
 
@@ -37,7 +50,16 @@ struct IkedaModeParams {
     time : f32,
     canvasWidth : f32,
     canvasHeight : f32,
-    padding : f32
+    
+    // Extended parameters
+    frequency : f32,
+    phaseShift : f32,
+    noiseLevel : f32,
+    stripWidth : f32,
+    quantumLevels : f32,
+    scanSpeed : f32,
+    matrixScale : f32,
+    pulseRate : f32
 }
 
 @group(0) @binding(0) var<uniform> u : Uniforms;
@@ -50,38 +72,7 @@ fn luminance(color: vec3<f32>) -> f32 {
     return dot(color, vec3<f32>(0.299, 0.587, 0.114));
 }
 
-// Grid quantization function
-fn quantizeToGrid(uv: vec2<f32>, gridSize: f32) -> vec2<f32> {
-    let pixelSize = 1.0 / gridSize;
-    return floor(uv / pixelSize) * pixelSize + pixelSize * 0.5;
-}
-
-// Generate smooth data pattern based on pixel values
-fn generateDataPattern(uv: vec2<f32>, color: vec3<f32>, time: f32) -> f32 {
-    let lum = luminance(color);
-    
-    // Smooth barcode-like pattern
-    let barcodeCoord = uv.x * 80.0 + lum * 5.0;
-    let barcodePattern = smoothstep(0.4, 0.6, fract(barcodeCoord + sin(time * 0.5) * 0.1));
-    
-    // Smooth grid overlay (fixed size for data mode)
-    let gridCoord = uv * 48.0;
-    let gridThickness = 0.08;
-    let gridX = smoothstep(1.0 - gridThickness, 1.0, fract(gridCoord.x));
-    let gridY = smoothstep(1.0 - gridThickness, 1.0, fract(gridCoord.y));
-    let gridPattern = max(gridX, gridY);
-    
-    // Smooth binary data visualization
-    let binaryCoord = floor(uv * 24.0);
-    let binaryValue = fract(sin(dot(binaryCoord, vec2<f32>(12.9898, 78.233))) * 43758.5453);
-    let binaryPattern = smoothstep(lum - 0.1, lum + 0.1, binaryValue);
-    
-    // Smooth combination instead of harsh max()
-    let combinedPattern = barcodePattern * 0.4 + gridPattern * 0.3 + binaryPattern * 0.3;
-    return clamp(combinedPattern, 0.0, 1.0);
-}
-
-// Main fragment function with Ikeda modes
+// Main fragment function with simplified modes
 @fragment
 fn fsImage(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
     var sampledColor = textureSample(texArr, samp, uv, u.layerIndex);
@@ -94,7 +85,6 @@ fn fsImage(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
     // Mode 1: Pure Black & White with dynamic threshold
     if (ikeda.mode == 1) {
         let lum = luminance(sampledColor.rgb);
-        // Reduced dynamic threshold variation to prevent excessive flickering
         let dynamicThreshold = ikeda.threshold + sin(ikeda.time * 1.5) * 0.05;
         let blackWhite = step(dynamicThreshold, lum);
         return vec4<f32>(blackWhite, blackWhite, blackWhite, sampledColor.a);
@@ -102,12 +92,11 @@ fn fsImage(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
     
     // Mode 2: Grid Quantization
     if (ikeda.mode == 2) {
-        let quantizedUV = quantizeToGrid(uv, ikeda.gridSize);
+        let pixelSize = 1.0 / ikeda.gridSize;
+        let quantizedUV = floor(uv / pixelSize) * pixelSize + pixelSize * 0.5;
         let quantizedColor = textureSample(texArr, samp, quantizedUV, u.layerIndex);
         let lum = luminance(quantizedColor.rgb);
         let blackWhite = step(ikeda.threshold, lum);
-        
-        // Return only the quantized result without grid lines
         return vec4<f32>(blackWhite, blackWhite, blackWhite, sampledColor.a);
     }
     
@@ -116,32 +105,174 @@ fn fsImage(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
         let lum = luminance(sampledColor.rgb);
         let blackWhite = step(ikeda.threshold, lum);
         
-        let dataPattern = generateDataPattern(uv, sampledColor.rgb, ikeda.time);
+        // Simple data pattern
+        let barcodeCoord = uv.x * 80.0 + lum * 5.0;
+        let barcodePattern = step(0.5, fract(barcodeCoord + sin(ikeda.time * 0.5) * 0.1));
         
-        // Smooth blending instead of harsh max() - prevents sudden transitions
-        let blendedData = dataPattern * ikeda.dataIntensity;
+        let blendedData = barcodePattern * ikeda.dataIntensity;
         let finalValue = clamp(blackWhite + blendedData * (1.0 - blackWhite), 0.0, 1.0);
-        
         return vec4<f32>(finalValue, finalValue, finalValue, sampledColor.a);
     }
     
-    // Mode 4: Binary Data Stream
+    // Mode 4: Binary Data Stream (simplified without bit operations)
     if (ikeda.mode == 4) {
-        // Convert to scanlines with better resolution
-        let scanlineCount = 48.0; // Balanced resolution
+        let scanlineCount = 48.0;
         let scanlineY = floor(uv.y * scanlineCount);
         let scanlineUV = vec2<f32>(uv.x, (scanlineY + 0.5) / scanlineCount);
         let scanlineColor = textureSample(texArr, samp, scanlineUV, u.layerIndex);
-        
-        // Create more stable binary representation
         let lum = luminance(scanlineColor.rgb);
-        let pixelValue = u32(lum * 255.0);
-        let bitsPerPixel = 8.0;
-        let bitPosition = u32(floor(fract(uv.x * bitsPerPixel) * bitsPerPixel));
-        let bitValue = f32((pixelValue >> bitPosition) & 1u);
         
-        return vec4<f32>(bitValue, bitValue, bitValue, sampledColor.a);
+        // Simplified binary pattern without bit operations
+        let binaryPattern = step(0.5, fract(uv.x * 64.0 + lum * 8.0));
+        return vec4<f32>(binaryPattern, binaryPattern, binaryPattern, sampledColor.a);
     }
+    
+    // Mode 5: Frequency Analysis
+    if (ikeda.mode == 5) {
+        let lum = luminance(sampledColor.rgb);
+        let blackWhite = step(ikeda.threshold, lum);
+        
+        // Frequency bars based on luminance and frequency parameter
+        let freqScale = ikeda.frequency * 2.0;
+        let freqPattern = sin(uv.y * freqScale * 20.0 + ikeda.time * 2.0) * 0.5 + 0.5;
+        let horizontalBars = step(0.6, freqPattern);
+        
+        // Spectral analysis overlay
+        let spectralCoord = uv.x * freqScale * 10.0 + lum * 5.0;
+        let spectralPattern = step(0.5, fract(spectralCoord + sin(ikeda.time) * 0.2));
+        
+        let combined = clamp(blackWhite + (horizontalBars + spectralPattern) * ikeda.dataIntensity * 0.3, 0.0, 1.0);
+        return vec4<f32>(combined, combined, combined, sampledColor.a);
+    }
+    
+    // Mode 6: Scan Lines
+    if (ikeda.mode == 6) {
+        let lum = luminance(sampledColor.rgb);
+        let blackWhite = step(ikeda.threshold, lum);
+        
+        // Progressive scanning based on scanSpeed
+        let scanPosition = fract(ikeda.time * ikeda.scanSpeed);
+        let scanLine = abs(uv.y - scanPosition);
+        let scanEffect = step(scanLine, 0.02);
+        
+        // Interlaced pattern
+        let interlace = step(0.5, fract(uv.y * 240.0));
+        
+        let combined = clamp(blackWhite + (scanEffect + interlace * 0.3) * ikeda.dataIntensity, 0.0, 1.0);
+        return vec4<f32>(combined, combined, combined, sampledColor.a);
+    }
+    
+    // Mode 7: Matrix Transformations
+    if (ikeda.mode == 7) {
+        let lum = luminance(sampledColor.rgb);
+        let blackWhite = step(ikeda.threshold, lum);
+        
+        // Rotating grid based on matrixScale
+        let scale = ikeda.matrixScale;
+        let rotation = ikeda.time * 0.5;
+        let rotatedUV = vec2<f32>(
+            uv.x * cos(rotation) - uv.y * sin(rotation),
+            uv.x * sin(rotation) + uv.y * cos(rotation)
+        );
+        
+        let gridPattern = step(0.9, fract(rotatedUV.x * scale * 20.0)) + 
+                         step(0.9, fract(rotatedUV.y * scale * 20.0));
+        
+        let combined = clamp(blackWhite + gridPattern * ikeda.dataIntensity, 0.0, 1.0);
+        return vec4<f32>(combined, combined, combined, sampledColor.a);
+    }
+    
+    // Mode 8: Pulse Patterns
+    if (ikeda.mode == 8) {
+        let lum = luminance(sampledColor.rgb);
+        let blackWhite = step(ikeda.threshold, lum);
+        
+        // Radial pulse based on pulseRate
+        let center = vec2<f32>(0.5, 0.5);
+        let dist = distance(uv, center);
+        let pulse = sin(dist * 20.0 - ikeda.time * ikeda.pulseRate * 4.0) * 0.5 + 0.5;
+        let pulsePattern = step(0.7, pulse);
+        
+        // Rhythmic grid
+        let rhythmicGrid = step(0.8, fract(uv.x * 10.0 + sin(ikeda.time * ikeda.pulseRate) * 2.0)) +
+                          step(0.8, fract(uv.y * 10.0 + cos(ikeda.time * ikeda.pulseRate) * 2.0));
+        
+        let combined = clamp(blackWhite + (pulsePattern + rhythmicGrid * 0.3) * ikeda.dataIntensity, 0.0, 1.0);
+        return vec4<f32>(combined, combined, combined, sampledColor.a);
+    }
+    
+    // Mode 9: Noise Patterns
+    if (ikeda.mode == 9) {
+        let lum = luminance(sampledColor.rgb);
+        let blackWhite = step(ikeda.threshold, lum);
+        
+        // Structured noise based on noiseLevel
+        let noiseCoord = uv * 50.0 + ikeda.time * 0.1;
+        let noise1 = fract(sin(dot(noiseCoord, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+        let noise2 = fract(sin(dot(noiseCoord + vec2<f32>(1.0, 1.0), vec2<f32>(12.9898, 78.233))) * 43758.5453);
+        
+        let noisePattern = step(1.0 - ikeda.noiseLevel, noise1);
+        let structuredNoise = step(0.5, noise2) * ikeda.noiseLevel;
+        
+        let combined = clamp(blackWhite + (noisePattern + structuredNoise) * ikeda.dataIntensity, 0.0, 1.0);
+        return vec4<f32>(combined, combined, combined, sampledColor.a);
+    }
+    
+    // Mode 10: Strip Decomposition
+    if (ikeda.mode == 10) {
+        let lum = luminance(sampledColor.rgb);
+        let blackWhite = step(ikeda.threshold, lum);
+        
+        // Alternating horizontal/vertical strips based on stripWidth
+        let stripSize = ikeda.stripWidth * 10.0;
+        let horizontalStrips = step(0.5, fract(uv.y / stripSize));
+        let verticalStrips = step(0.5, fract(uv.x / stripSize));
+        
+        // Time-based switching between horizontal and vertical
+        let timeSwitch = step(0.5, fract(ikeda.time * 0.3));
+        let stripPattern = mix(horizontalStrips, verticalStrips, timeSwitch);
+        
+        let combined = clamp(blackWhite * stripPattern + (1.0 - stripPattern) * blackWhite * 0.3, 0.0, 1.0);
+        return vec4<f32>(combined, combined, combined, sampledColor.a);
+    }
+    
+    // Mode 11: Phase Interference
+    if (ikeda.mode == 11) {
+        let lum = luminance(sampledColor.rgb);
+        let blackWhite = step(ikeda.threshold, lum);
+        
+        // Multiple wave phases with interference
+        let wave1 = sin(uv.x * 30.0 + ikeda.time + ikeda.phaseShift);
+        let wave2 = sin(uv.y * 30.0 + ikeda.time * 1.2);
+        let wave3 = sin((uv.x + uv.y) * 20.0 + ikeda.time * 0.8 + ikeda.phaseShift * 2.0);
+        
+        let interference = (wave1 + wave2 + wave3) / 3.0;
+        let phasePattern = step(0.3, interference * 0.5 + 0.5);
+        
+        let combined = clamp(blackWhite + phasePattern * ikeda.dataIntensity * 0.4, 0.0, 1.0);
+        return vec4<f32>(combined, combined, combined, sampledColor.a);
+    }
+    
+    // Mode 12: Quantum Levels
+    if (ikeda.mode == 12) {
+        let lum = luminance(sampledColor.rgb);
+        
+        // Quantize luminance to discrete levels
+        let levels = ikeda.quantumLevels;
+        let quantizedLum = floor(lum * levels) / levels;
+        
+        // Quantum tunneling effect
+        let tunnelCoord = uv * 20.0 + ikeda.time * 0.2;
+        let tunnel = fract(sin(dot(tunnelCoord, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+        let tunnelPattern = step(0.9, tunnel) * (1.0 / levels);
+        
+        // Energy level visualization
+        let energyLevel = floor(quantizedLum * levels) / levels;
+        let levelPattern = step(ikeda.threshold, energyLevel + tunnelPattern);
+        
+        return vec4<f32>(levelPattern, levelPattern, levelPattern, sampledColor.a);
+    }
+
     
     return sampledColor;
 }
@@ -165,7 +296,16 @@ struct IkedaModeParams {
     time : f32,
     canvasWidth : f32,
     canvasHeight : f32,
-    padding : f32
+    
+    // Extended parameters
+    frequency : f32,
+    phaseShift : f32,
+    noiseLevel : f32,
+    stripWidth : f32,
+    quantumLevels : f32,
+    scanSpeed : f32,
+    matrixScale : f32,
+    pulseRate : f32
 }
 
 @group(0) @binding(2) var<uniform> fadeParam : FadeParams;
@@ -189,7 +329,7 @@ fn fsFade(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
     
     // Smoother Black & White conversion for fade shader
     let lum = luminance(mixed.rgb);
-    let dynamicThreshold = ikeda.threshold + sin(ikeda.time * 1.0) * 0.02; // Less aggressive
+    let dynamicThreshold = ikeda.threshold + sin(ikeda.time * 1.0) * 0.02;
     let blackWhite = step(dynamicThreshold, lum);
     
     return vec4<f32>(blackWhite, blackWhite, blackWhite, mixed.a);
@@ -214,7 +354,16 @@ struct IkedaModeParams {
     time : f32,
     canvasWidth : f32,
     canvasHeight : f32,
-    padding : f32
+    
+    // Extended parameters
+    frequency : f32,
+    phaseShift : f32,
+    noiseLevel : f32,
+    stripWidth : f32,
+    quantumLevels : f32,
+    scanSpeed : f32,
+    matrixScale : f32,
+    pulseRate : f32
 }
 
 @group(0) @binding(2) var<uniform> scrollParam : ScrollParams;
@@ -237,7 +386,6 @@ fn fsPresent(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
     let lum = luminance(baseColor.rgb);
     let blackWhite = step(ikeda.threshold, lum);
     
-    // No edge overlay patterns - just return the black & white conversion
     return vec4<f32>(blackWhite, blackWhite, blackWhite, baseColor.a);
 }
 )";

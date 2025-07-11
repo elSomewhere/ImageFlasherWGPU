@@ -1,8 +1,8 @@
 // Enhanced Ikeda-inspired control system for ImageFlasherWGPU
-// Handles new visual modes, data analysis, and precise control interface
+// Extended with 8 new visual modes and advanced parameter controls
 
 Module['onRuntimeInitialized'] = () => {
-    console.log("WASM runtime initialized. Setting up Ikeda control system...");
+    console.log("WASM runtime initialized. Setting up extended Ikeda control system...");
 
     // ------------------------------------------------------------------------
     // 1) WebSocket Connection with Enhanced Data Handling
@@ -80,7 +80,7 @@ Module['onRuntimeInitialized'] = () => {
     }
 
     // ------------------------------------------------------------------------
-    // 2) Enhanced Control System with Ikeda Functions
+    // 2) Enhanced Control System with Extended Ikeda Functions
     // ------------------------------------------------------------------------
 
     // Create cwrap references for all functions
@@ -93,27 +93,72 @@ Module['onRuntimeInitialized'] = () => {
     const setScrollingOffset     = Module.cwrap('setScrollingOffset', null, ['number', 'number']);
     const setTileFactor          = Module.cwrap('setTileFactor', null, ['number']);
 
-    // New Ikeda functions (these would need to be implemented in the C++ code)
+    // Core Ikeda functions
     const setIkedaMode           = Module.cwrap('setIkedaMode', null, ['number']);
     const setIkedaThreshold      = Module.cwrap('setIkedaThreshold', null, ['number']);
     const setIkedaGridSize       = Module.cwrap('setIkedaGridSize', null, ['number']);
     const setIkedaDataIntensity  = Module.cwrap('setIkedaDataIntensity', null, ['number']);
+    
+    // Extended Ikeda functions for new modes
+    const setIkedaFrequency      = Module.cwrap('setIkedaFrequency', null, ['number']);
+    const setIkedaPhaseShift     = Module.cwrap('setIkedaPhaseShift', null, ['number']);
+    const setIkedaNoiseLevel     = Module.cwrap('setIkedaNoiseLevel', null, ['number']);
+    const setIkedaStripWidth     = Module.cwrap('setIkedaStripWidth', null, ['number']);
+    const setIkedaQuantumLevels  = Module.cwrap('setIkedaQuantumLevels', null, ['number']);
+    const setIkedaScanSpeed      = Module.cwrap('setIkedaScanSpeed', null, ['number']);
+    const setIkedaMatrixScale    = Module.cwrap('setIkedaMatrixScale', null, ['number']);
+    const setIkedaPulseRate      = Module.cwrap('setIkedaPulseRate', null, ['number']);
+    
+    // Data analysis functions
     const getImageAverageLuminance = Module.cwrap('getImageAverageLuminance', 'number', []);
     const getImageEntropy        = Module.cwrap('getImageEntropy', 'number', []);
     const getImageVariance       = Module.cwrap('getImageVariance', 'number', []);
 
     // Get DOM elements
     const elements = {
-        // Ikeda controls
+        // Ikeda mode controls
         ikedaMode: document.getElementById('ikedaMode'),
         ikedaThreshold: document.getElementById('ikedaThreshold'),
         ikedaGridSize: document.getElementById('ikedaGridSize'),
         ikedaDataIntensity: document.getElementById('ikedaDataIntensity'),
         
+        // Extended mode parameters
+        ikedaFrequency: document.getElementById('ikedaFrequency'),
+        ikedaScanSpeed: document.getElementById('ikedaScanSpeed'),
+        ikedaMatrixScale: document.getElementById('ikedaMatrixScale'),
+        ikedaPulseRate: document.getElementById('ikedaPulseRate'),
+        ikedaNoiseLevel: document.getElementById('ikedaNoiseLevel'),
+        ikedaStripWidth: document.getElementById('ikedaStripWidth'),
+        ikedaPhaseShift: document.getElementById('ikedaPhaseShift'),
+        ikedaQuantumLevels: document.getElementById('ikedaQuantumLevels'),
+        
         // Value displays
         thresholdValue: document.getElementById('thresholdValue'),
         gridSizeValue: document.getElementById('gridSizeValue'),
         dataIntensityValue: document.getElementById('dataIntensityValue'),
+        frequencyValue: document.getElementById('frequencyValue'),
+        scanSpeedValue: document.getElementById('scanSpeedValue'),
+        matrixScaleValue: document.getElementById('matrixScaleValue'),
+        pulseRateValue: document.getElementById('pulseRateValue'),
+        noiseLevelValue: document.getElementById('noiseLevelValue'),
+        stripWidthValue: document.getElementById('stripWidthValue'),
+        phaseShiftValue: document.getElementById('phaseShiftValue'),
+        quantumLevelsValue: document.getElementById('quantumLevelsValue'),
+        
+        // Core parameter rows
+        thresholdRow: document.getElementById('thresholdRow'),
+        gridSizeRow: document.getElementById('gridSizeRow'),
+        dataIntensityRow: document.getElementById('dataIntensityRow'),
+        
+        // Mode-specific control panels
+        frequencyControls: document.getElementById('frequencyControls'),
+        scanControls: document.getElementById('scanControls'),
+        matrixControls: document.getElementById('matrixControls'),
+        pulseControls: document.getElementById('pulseControls'),
+        noiseControls: document.getElementById('noiseControls'),
+        stripControls: document.getElementById('stripControls'),
+        phaseControls: document.getElementById('phaseControls'),
+        quantumControls: document.getElementById('quantumControls'),
         
         // Original controls
         fadeSlider: document.getElementById('fadeSlider'),
@@ -145,6 +190,7 @@ Module['onRuntimeInitialized'] = () => {
         currentMode: document.getElementById('currentMode'),
         imageCounter: document.getElementById('imageCounter'),
         modeIndicator: document.getElementById('modeIndicator'),
+        connectionStatus: document.getElementById('connectionStatus'),
         
         // Data display
         dataLuminance: document.getElementById('dataLuminance'),
@@ -157,10 +203,14 @@ Module['onRuntimeInitialized'] = () => {
     };
 
     // ------------------------------------------------------------------------
-    // 3) Ikeda Mode Control
+    // 3) Enhanced Ikeda Mode Control
     // ------------------------------------------------------------------------
 
-    const modeNames = ['NORMAL', 'BLACK/WHITE', 'GRID', 'DATA', 'BINARY'];
+    const modeNames = [
+        'NORMAL', 'BLACK/WHITE', 'GRID', 'DATA', 'BINARY',
+        'FREQUENCY', 'SCAN', 'MATRIX', 'PULSE', 'NOISE',
+        'STRIP', 'PHASE', 'QUANTUM'
+    ];
 
     elements.ikedaMode.addEventListener('change', () => {
         const mode = parseInt(elements.ikedaMode.value);
@@ -182,21 +232,19 @@ Module['onRuntimeInitialized'] = () => {
         console.log(`Ikeda mode changed to: ${modeName}`);
     });
 
-    // Threshold control
+    // Core parameter controls
     elements.ikedaThreshold.addEventListener('input', () => {
         const val = parseFloat(elements.ikedaThreshold.value);
         elements.thresholdValue.textContent = val.toFixed(2);
         setIkedaThreshold(val);
     });
 
-    // Grid size control
     elements.ikedaGridSize.addEventListener('input', () => {
         const val = parseInt(elements.ikedaGridSize.value);
         elements.gridSizeValue.textContent = val;
         setIkedaGridSize(val);
     });
 
-    // Data intensity control
     elements.ikedaDataIntensity.addEventListener('input', () => {
         const val = parseFloat(elements.ikedaDataIntensity.value);
         elements.dataIntensityValue.textContent = val.toFixed(2);
@@ -204,7 +252,67 @@ Module['onRuntimeInitialized'] = () => {
     });
 
     // ------------------------------------------------------------------------
-    // 4) Original Controls (Enhanced)
+    // 4) Extended Mode Parameter Controls
+    // ------------------------------------------------------------------------
+
+    // Frequency mode controls
+    elements.ikedaFrequency.addEventListener('input', () => {
+        const val = parseFloat(elements.ikedaFrequency.value);
+        elements.frequencyValue.textContent = val.toFixed(1);
+        setIkedaFrequency(val);
+    });
+
+    // Scan mode controls
+    elements.ikedaScanSpeed.addEventListener('input', () => {
+        const val = parseFloat(elements.ikedaScanSpeed.value);
+        elements.scanSpeedValue.textContent = val.toFixed(1);
+        setIkedaScanSpeed(val);
+    });
+
+    // Matrix mode controls
+    elements.ikedaMatrixScale.addEventListener('input', () => {
+        const val = parseFloat(elements.ikedaMatrixScale.value);
+        elements.matrixScaleValue.textContent = val.toFixed(1);
+        setIkedaMatrixScale(val);
+    });
+
+    // Pulse mode controls
+    elements.ikedaPulseRate.addEventListener('input', () => {
+        const val = parseFloat(elements.ikedaPulseRate.value);
+        elements.pulseRateValue.textContent = val.toFixed(1);
+        setIkedaPulseRate(val);
+    });
+
+    // Noise mode controls
+    elements.ikedaNoiseLevel.addEventListener('input', () => {
+        const val = parseFloat(elements.ikedaNoiseLevel.value);
+        elements.noiseLevelValue.textContent = val.toFixed(2);
+        setIkedaNoiseLevel(val);
+    });
+
+    // Strip mode controls
+    elements.ikedaStripWidth.addEventListener('input', () => {
+        const val = parseFloat(elements.ikedaStripWidth.value);
+        elements.stripWidthValue.textContent = val.toFixed(2);
+        setIkedaStripWidth(val);
+    });
+
+    // Phase mode controls
+    elements.ikedaPhaseShift.addEventListener('input', () => {
+        const val = parseFloat(elements.ikedaPhaseShift.value);
+        elements.phaseShiftValue.textContent = val.toFixed(2);
+        setIkedaPhaseShift(val);
+    });
+
+    // Quantum mode controls
+    elements.ikedaQuantumLevels.addEventListener('input', () => {
+        const val = parseInt(elements.ikedaQuantumLevels.value);
+        elements.quantumLevelsValue.textContent = val;
+        setIkedaQuantumLevels(val);
+    });
+
+    // ------------------------------------------------------------------------
+    // 5) Original Control Event Listeners (Enhanced)
     // ------------------------------------------------------------------------
 
     elements.fadeSlider.addEventListener('input', () => {
@@ -215,7 +323,7 @@ Module['onRuntimeInitialized'] = () => {
 
     elements.switchSlider.addEventListener('input', () => {
         const val = parseFloat(elements.switchSlider.value);
-        elements.switchValue.textContent = val.toFixed(2);
+        elements.switchValue.textContent = val.toFixed(4);
         setImageSwitchInterval(val);
     });
 
@@ -235,15 +343,15 @@ Module['onRuntimeInitialized'] = () => {
     elements.scrollSpeedX.addEventListener('input', () => {
         const val = parseFloat(elements.scrollSpeedX.value);
         elements.scrollSpeedXVal.textContent = val.toFixed(2);
-        const speedY = parseFloat(elements.scrollSpeedY.value);
-        setScrollingSpeed(val, speedY);
+        const sy = parseFloat(elements.scrollSpeedY.value);
+        setScrollingSpeed(val, sy);
     });
 
     elements.scrollSpeedY.addEventListener('input', () => {
         const val = parseFloat(elements.scrollSpeedY.value);
         elements.scrollSpeedYVal.textContent = val.toFixed(2);
-        const speedX = parseFloat(elements.scrollSpeedX.value);
-        setScrollingSpeed(speedX, val);
+        const sx = parseFloat(elements.scrollSpeedX.value);
+        setScrollingSpeed(sx, val);
     });
 
     elements.scrollOffsetX.addEventListener('input', () => {
@@ -269,11 +377,194 @@ Module['onRuntimeInitialized'] = () => {
 
     // Reset system button
     elements.resetSystemBtn.addEventListener('click', () => {
+        resetAllControls();
+    });
+
+    // ------------------------------------------------------------------------
+    // 6) Enhanced Keyboard Shortcuts
+    // ------------------------------------------------------------------------
+
+    document.addEventListener('keydown', (event) => {
+        if (event.target.tagName === 'INPUT') return; // Don't interfere with input fields
+        
+        switch(event.key) {
+            // Mode switching (1-9, 0, -, =)
+            case '1': switchToMode(1); break;
+            case '2': switchToMode(2); break;
+            case '3': switchToMode(3); break;
+            case '4': switchToMode(4); break;
+            case '5': switchToMode(5); break;
+            case '6': switchToMode(6); break;
+            case '7': switchToMode(7); break;
+            case '8': switchToMode(8); break;
+            case '9': switchToMode(9); break;
+            case '0': switchToMode(10); break;
+            case '-': switchToMode(11); break;
+            case '=': switchToMode(12); break;
+            
+            // Mode shortcuts
+            case 'b':
+            case 'B':
+                switchToMode(1); // Black/White
+                break;
+            case 'g':
+            case 'G':
+                switchToMode(2); // Grid
+                break;
+            case 'd':
+            case 'D':
+                switchToMode(3); // Data
+                break;
+            case 'f':
+            case 'F':
+                switchToMode(5); // Frequency
+                break;
+            case 's':
+            case 'S':
+                switchToMode(6); // Scan
+                break;
+            case 'm':
+            case 'M':
+                switchToMode(7); // Matrix
+                break;
+            case 'p':
+            case 'P':
+                switchToMode(8); // Pulse
+                break;
+            case 'n':
+            case 'N':
+                switchToMode(9); // Noise
+                break;
+                
+            // Parameter adjustments
+            case 't':
+            case 'T':
+                cycleThreshold();
+                break;
+            case 'r':
+            case 'R':
+                resetAllControls();
+                break;
+                
+            // Fullscreen
+            case 'Escape':
+                toggleFullscreen();
+                break;
+        }
+        
+        event.preventDefault();
+    });
+
+    // ------------------------------------------------------------------------
+    // 7) UI Management Functions
+    // ------------------------------------------------------------------------
+
+    function updateUIForMode(mode) {
+        // Hide all core parameter rows by default
+        const allCoreRows = [elements.thresholdRow, elements.gridSizeRow, elements.dataIntensityRow];
+        allCoreRows.forEach(row => {
+            if (row) row.style.display = 'none';
+        });
+        
+        // Hide all mode-specific controls
+        const allModeControls = [
+            elements.frequencyControls, elements.scanControls, elements.matrixControls,
+            elements.pulseControls, elements.noiseControls, elements.stripControls,
+            elements.phaseControls, elements.quantumControls
+        ];
+        
+        allModeControls.forEach(control => {
+            if (control) control.classList.remove('active');
+        });
+        
+        // Show appropriate core parameters based on mode
+        switch(mode) {
+            case 0: // NORMAL - no core parameters
+                break;
+            case 1: // BLACK/WHITE - only threshold
+                if (elements.thresholdRow) elements.thresholdRow.style.display = 'flex';
+                break;
+            case 2: // GRID - threshold and grid size
+                if (elements.thresholdRow) elements.thresholdRow.style.display = 'flex';
+                if (elements.gridSizeRow) elements.gridSizeRow.style.display = 'flex';
+                break;
+            case 3: // DATA - threshold and data intensity
+                if (elements.thresholdRow) elements.thresholdRow.style.display = 'flex';
+                if (elements.dataIntensityRow) elements.dataIntensityRow.style.display = 'flex';
+                break;
+            case 4: // BINARY - only threshold
+                if (elements.thresholdRow) elements.thresholdRow.style.display = 'flex';
+                break;
+            case 5: // FREQUENCY - threshold and data intensity
+                if (elements.thresholdRow) elements.thresholdRow.style.display = 'flex';
+                if (elements.dataIntensityRow) elements.dataIntensityRow.style.display = 'flex';
+                if (elements.frequencyControls) elements.frequencyControls.classList.add('active');
+                break;
+            case 6: // SCAN - threshold and data intensity
+                if (elements.thresholdRow) elements.thresholdRow.style.display = 'flex';
+                if (elements.dataIntensityRow) elements.dataIntensityRow.style.display = 'flex';
+                if (elements.scanControls) elements.scanControls.classList.add('active');
+                break;
+            case 7: // MATRIX - threshold and data intensity
+                if (elements.thresholdRow) elements.thresholdRow.style.display = 'flex';
+                if (elements.dataIntensityRow) elements.dataIntensityRow.style.display = 'flex';
+                if (elements.matrixControls) elements.matrixControls.classList.add('active');
+                break;
+            case 8: // PULSE - threshold and data intensity
+                if (elements.thresholdRow) elements.thresholdRow.style.display = 'flex';
+                if (elements.dataIntensityRow) elements.dataIntensityRow.style.display = 'flex';
+                if (elements.pulseControls) elements.pulseControls.classList.add('active');
+                break;
+            case 9: // NOISE - threshold and data intensity
+                if (elements.thresholdRow) elements.thresholdRow.style.display = 'flex';
+                if (elements.dataIntensityRow) elements.dataIntensityRow.style.display = 'flex';
+                if (elements.noiseControls) elements.noiseControls.classList.add('active');
+                break;
+            case 10: // STRIP - only threshold (no data intensity overlay)
+                if (elements.thresholdRow) elements.thresholdRow.style.display = 'flex';
+                if (elements.stripControls) elements.stripControls.classList.add('active');
+                break;
+            case 11: // PHASE - threshold and data intensity
+                if (elements.thresholdRow) elements.thresholdRow.style.display = 'flex';
+                if (elements.dataIntensityRow) elements.dataIntensityRow.style.display = 'flex';
+                if (elements.phaseControls) elements.phaseControls.classList.add('active');
+                break;
+            case 12: // QUANTUM - only threshold (uses its own quantization)
+                if (elements.thresholdRow) elements.thresholdRow.style.display = 'flex';
+                if (elements.quantumControls) elements.quantumControls.classList.add('active');
+                break;
+        }
+    }
+
+    function switchToMode(mode) {
+        elements.ikedaMode.value = mode;
+        elements.ikedaMode.dispatchEvent(new Event('change'));
+    }
+
+    function cycleThreshold() {
+        const currentThreshold = parseFloat(elements.ikedaThreshold.value);
+        const thresholds = [0.1, 0.3, 0.5, 0.7, 0.9];
+        const currentIndex = thresholds.findIndex(t => Math.abs(t - currentThreshold) < 0.01);
+        const nextIndex = (currentIndex + 1) % thresholds.length;
+        
+        elements.ikedaThreshold.value = thresholds[nextIndex];
+        elements.ikedaThreshold.dispatchEvent(new Event('input'));
+    }
+
+    function resetAllControls() {
         // Reset all controls to defaults
         elements.ikedaMode.value = "1";
         elements.ikedaThreshold.value = "0.5";
         elements.ikedaGridSize.value = "32";
         elements.ikedaDataIntensity.value = "0.5";
+        elements.ikedaFrequency.value = "3";
+        elements.ikedaScanSpeed.value = "0.5";
+        elements.ikedaMatrixScale.value = "1";
+        elements.ikedaPulseRate.value = "2";
+        elements.ikedaNoiseLevel.value = "0.5";
+        elements.ikedaStripWidth.value = "0.05";
+        elements.ikedaPhaseShift.value = "1.57";
+        elements.ikedaQuantumLevels.value = "8";
         elements.fadeSlider.value = "0.5";
         elements.switchSlider.value = "0.33";
         elements.tileSlider.value = "3";
@@ -283,223 +574,92 @@ Module['onRuntimeInitialized'] = () => {
         elements.scrollOffsetX.value = "0.10";
         elements.scrollOffsetY.value = "0.00";
         
-        // Update UI for reset mode
-        updateUIForMode(1); // BLACK/WHITE mode
-        
         // Trigger all change events
-        elements.ikedaMode.dispatchEvent(new Event('change'));
-        elements.ikedaThreshold.dispatchEvent(new Event('input'));
-        elements.ikedaGridSize.dispatchEvent(new Event('input'));
-        elements.ikedaDataIntensity.dispatchEvent(new Event('input'));
-        elements.fadeSlider.dispatchEvent(new Event('input'));
-        elements.switchSlider.dispatchEvent(new Event('input'));
-        elements.tileSlider.dispatchEvent(new Event('input'));
-        elements.uploadsSlider.dispatchEvent(new Event('input'));
-        elements.scrollSpeedX.dispatchEvent(new Event('input'));
-        elements.scrollSpeedY.dispatchEvent(new Event('input'));
-        elements.scrollOffsetX.dispatchEvent(new Event('input'));
-        elements.scrollOffsetY.dispatchEvent(new Event('input'));
+        const allControls = [
+            'ikedaMode', 'ikedaThreshold', 'ikedaGridSize', 'ikedaDataIntensity',
+            'ikedaFrequency', 'ikedaScanSpeed', 'ikedaMatrixScale', 'ikedaPulseRate',
+            'ikedaNoiseLevel', 'ikedaStripWidth', 'ikedaPhaseShift', 'ikedaQuantumLevels',
+            'fadeSlider', 'switchSlider', 'tileSlider', 'uploadsSlider',
+            'scrollSpeedX', 'scrollSpeedY', 'scrollOffsetX', 'scrollOffsetY'
+        ];
         
-        console.log("System reset to defaults");
-    });
-
-    // ------------------------------------------------------------------------
-    // 5) Dynamic UI Updates Based on Mode
-    // ------------------------------------------------------------------------
-
-    function updateUIForMode(mode) {
-        // Get control row elements
-        const thresholdRow = elements.ikedaThreshold.closest('.control-row');
-        const gridSizeRow = elements.ikedaGridSize.closest('.control-row');
-        const dataIntensityRow = elements.ikedaDataIntensity.closest('.control-row');
+        allControls.forEach(controlName => {
+            const element = elements[controlName];
+            if (element) {
+                const eventType = controlName === 'ikedaMode' ? 'change' : 'input';
+                element.dispatchEvent(new Event(eventType));
+            }
+        });
         
-        // Get label elements
-        const thresholdLabel = thresholdRow.querySelector('label');
-        const gridSizeLabel = gridSizeRow.querySelector('label');
-        const dataIntensityLabel = dataIntensityRow.querySelector('label');
-        
-        // Hide all controls initially
-        thresholdRow.style.display = 'none';
-        gridSizeRow.style.display = 'none';
-        dataIntensityRow.style.display = 'none';
-        
-        switch(mode) {
-            case 0: // NORMAL
-                // No special controls needed
-                break;
-                
-            case 1: // BLACK/WHITE
-                thresholdRow.style.display = 'flex';
-                thresholdLabel.textContent = 'B/W Threshold:';
-                break;
-                
-            case 2: // GRID
-                thresholdRow.style.display = 'flex';
-                gridSizeRow.style.display = 'flex';
-                thresholdLabel.textContent = 'Grid Threshold:';
-                gridSizeLabel.textContent = 'Grid Resolution:';
-                break;
-                
-            case 3: // DATA
-                thresholdRow.style.display = 'flex';
-                dataIntensityRow.style.display = 'flex';
-                thresholdLabel.textContent = 'Base Threshold:';
-                dataIntensityLabel.textContent = 'Data Overlay:';
-                break;
-                
-            case 4: // BINARY
-                // No controls needed - pure binary representation
-                break;
-        }
+        console.log("All controls reset to defaults");
     }
 
-    // ------------------------------------------------------------------------
-    // 6) Keyboard Shortcuts (Ikeda Exhibition Mode)
-    // ------------------------------------------------------------------------
-
-    document.addEventListener('keydown', (event) => {
-        switch(event.key) {
-            case '1':
-            case '2':
-            case '3':
-            case '4':
-                const mode = parseInt(event.key) - 1;
-                elements.ikedaMode.value = mode.toString();
-                updateUIForMode(mode);
-                elements.ikedaMode.dispatchEvent(new Event('change'));
-                break;
-                
-            case 'b':
-            case 'B':
-                elements.ikedaMode.value = "1"; // Black/White mode
-                updateUIForMode(1);
-                elements.ikedaMode.dispatchEvent(new Event('change'));
-                break;
-                
-            case 'g':
-            case 'G':
-                // Cycle through grid sizes
-                const currentGrid = parseInt(elements.ikedaGridSize.value);
-                const gridSizes = [8, 16, 32, 64, 128];
-                const currentIndex = gridSizes.indexOf(currentGrid);
-                const nextGrid = gridSizes[(currentIndex + 1) % gridSizes.length];
-                elements.ikedaGridSize.value = nextGrid;
-                elements.ikedaGridSize.dispatchEvent(new Event('input'));
-                break;
-                
-            case 't':
-            case 'T':
-                // Toggle between high and low threshold
-                const currentThreshold = parseFloat(elements.ikedaThreshold.value);
-                const newThreshold = currentThreshold > 0.5 ? 0.2 : 0.8;
-                elements.ikedaThreshold.value = newThreshold;
-                elements.ikedaThreshold.dispatchEvent(new Event('input'));
-                break;
-                
-            case 'r':
-            case 'R':
-                elements.resetSystemBtn.click();
-                break;
-                
-            case 'Escape':
-                toggleFullscreen();
-                break;
-        }
-    });
-
-    // ------------------------------------------------------------------------
-    // 7) Data Display Updates
-    // ------------------------------------------------------------------------
-
     function updateDataDisplay(analysisData) {
-        if (!analysisData) return;
-        
-        elements.dataLuminance.textContent = analysisData.mean_luminance?.toFixed(1) || '---';
-        elements.dataEntropy.textContent = analysisData.entropy?.toFixed(2) || '---';
-        elements.dataVariance.textContent = analysisData.variance?.toFixed(0) || '---';
-        elements.dataEdgeDensity.textContent = analysisData.edge_density?.toFixed(3) || '---';
-        elements.dataFreqRatio.textContent = analysisData.high_freq_ratio?.toFixed(2) || '---';
-        elements.dataCompression.textContent = analysisData.estimated_compression?.toFixed(2) || '---';
-        
-        if (analysisData.timestamp) {
-            const date = new Date(analysisData.timestamp * 1000);
-            elements.dataTimestamp.textContent = date.toLocaleTimeString();
+        if (analysisData) {
+            elements.dataLuminance.textContent = (analysisData.luminance || 0).toFixed(3);
+            elements.dataEntropy.textContent = (analysisData.entropy || 0).toFixed(3);
+            elements.dataVariance.textContent = (analysisData.variance || 0).toFixed(3);
+            elements.dataEdgeDensity.textContent = (analysisData.edge_density || 0).toFixed(3);
+            elements.dataFreqRatio.textContent = (analysisData.freq_ratio || 0).toFixed(3);
+            elements.dataCompression.textContent = (analysisData.compression || 0).toFixed(3);
         }
+        
+        // Update timestamp
+        const now = new Date();
+        elements.dataTimestamp.textContent = now.toLocaleTimeString();
     }
 
     function updateCounters() {
-        elements.imageCounter.textContent = imageCounter;
-        
         // Update FPS counter
         const now = Date.now();
         if (now - lastFpsTime >= 1000) {
-            fpsCounter = Math.round(frameCount * 1000 / (now - lastFpsTime));
-            elements.fpsCounter.textContent = fpsCounter;
+            fpsCounter = frameCount;
             frameCount = 0;
             lastFpsTime = now;
+            elements.fpsCounter.textContent = fpsCounter;
         }
+        
+        // Update image counter
+        elements.imageCounter.textContent = imageCounter;
     }
 
     function updateStatusBar(message, color) {
-        const statusElements = document.querySelectorAll('#statusBar span');
-        if (statusElements.length > 0) {
-            statusElements[statusElements.length - 1].textContent = message;
-            statusElements[statusElements.length - 1].style.color = color || '#FFFFFF';
-        }
+        elements.connectionStatus.textContent = message;
+        elements.connectionStatus.style.color = color || "#FFFFFF";
     }
 
     function toggleFullscreen() {
-        const controls = document.getElementById('controls');
-        const dataDisplay = document.getElementById('dataDisplay');
-        const shortcuts = document.getElementById('shortcuts');
-        const statusBar = document.getElementById('statusBar');
-        
-        const isHidden = controls.style.display === 'none';
-        
-        const displayValue = isHidden ? 'block' : 'none';
-        controls.style.display = displayValue;
-        dataDisplay.style.display = displayValue;
-        shortcuts.style.display = displayValue;
-        statusBar.style.display = displayValue;
-        
-        console.log(isHidden ? "UI shown" : "UI hidden (exhibition mode)");
+        if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(err => {
+                console.log(`Error attempting to enable fullscreen: ${err.message}`);
+            });
+        } else {
+            document.exitFullscreen();
+        }
     }
 
     // ------------------------------------------------------------------------
-    // 8) Initialize Default Values
+    // 8) Initialize Default State
     // ------------------------------------------------------------------------
+
+    // Set initial mode and trigger UI update
+    elements.ikedaMode.dispatchEvent(new Event('change'));
     
-    // Set initial values and trigger events
-    setTimeout(() => {
-        // Initialize UI for default mode first
-        const initialMode = parseInt(elements.ikedaMode.value);
-        updateUIForMode(initialMode);
-        
-        elements.ikedaMode.dispatchEvent(new Event('change'));
-        elements.ikedaThreshold.dispatchEvent(new Event('input'));
-        elements.ikedaGridSize.dispatchEvent(new Event('input'));
-        elements.ikedaDataIntensity.dispatchEvent(new Event('input'));
-        elements.fadeSlider.dispatchEvent(new Event('input'));
-        elements.switchSlider.dispatchEvent(new Event('input'));
-        elements.tileSlider.dispatchEvent(new Event('input'));
-        elements.uploadsSlider.dispatchEvent(new Event('input'));
-        elements.scrollSpeedX.dispatchEvent(new Event('input'));
-        elements.scrollSpeedY.dispatchEvent(new Event('input'));
-        elements.scrollOffsetX.dispatchEvent(new Event('input'));
-        elements.scrollOffsetY.dispatchEvent(new Event('input'));
-        
-        console.log("Ikeda control system initialized");
-        updateStatusBar("DATA.MATRIX READY", "#FFFFFF");
-    }, 100);
-
-    // Update buffer usage periodically
-    setInterval(() => {
-        if (getBufferUsage && getRingBufferSize) {
-            const usage = getBufferUsage();
-            const capacity = getRingBufferSize();
-            elements.bufferUsageLabel.textContent = `Buffer: ${usage}/${capacity}`;
+    // Initialize all control values
+    const initControls = [
+        'ikedaThreshold', 'ikedaGridSize', 'ikedaDataIntensity',
+        'ikedaFrequency', 'ikedaScanSpeed', 'ikedaMatrixScale', 'ikedaPulseRate',
+        'ikedaNoiseLevel', 'ikedaStripWidth', 'ikedaPhaseShift', 'ikedaQuantumLevels',
+        'fadeSlider', 'switchSlider', 'tileSlider', 'uploadsSlider',
+        'scrollSpeedX', 'scrollSpeedY', 'scrollOffsetX', 'scrollOffsetY'
+    ];
+    
+    initControls.forEach(controlName => {
+        const element = elements[controlName];
+        if (element) {
+            element.dispatchEvent(new Event('input'));
         }
-    }, 5000);
+    });
 
-    console.log("Ikeda WebSocket + UI control system ready");
+    console.log("Extended Ikeda control system initialized with 13 modes");
 }; 
