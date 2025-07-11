@@ -50,7 +50,8 @@ target_link_options(index PRIVATE
         "SHELL:-s DISABLE_EXCEPTION_CATCHING=0"
 
         # Add malloc and free here - let EMSCRIPTEN_KEEPALIVE handle function exports
-        "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','stackAlloc','stackSave','stackRestore']"
+        "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','stackAlloc','stackSave','stackRestore','HEAPU8']"
+        "SHELL:-s EXPORTED_FUNCTIONS=['_malloc','_free','_main']"
 
 #        "SHELL:-s USE_BOOST_HEADERS=1"
         -pthread

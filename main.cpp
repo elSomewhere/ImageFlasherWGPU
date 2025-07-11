@@ -1095,8 +1095,8 @@ void onAdapterRequestEnded(WGPURequestAdapterStatus status, WGPUAdapter cAdapter
 }
 
 int main() {
-    WGPUInstanceDescriptor instanceDesc = {};
-    WGPUInstance instance = wgpuCreateInstance(&instanceDesc);
+    // Note: Emscripten WebGPU requires nullptr for wgpuCreateInstance
+    WGPUInstance instance = wgpuCreateInstance(nullptr);
 
     WGPURequestAdapterOptions opts = {};
     opts.powerPreference = WGPUPowerPreference_HighPerformance;
