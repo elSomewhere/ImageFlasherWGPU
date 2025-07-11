@@ -176,6 +176,9 @@ Module['onRuntimeInitialized'] = () => {
             elements.modeIndicator.classList.remove('mode-flash');
         }, 1000);
         
+        // Update UI based on mode
+        updateUIForMode(mode);
+        
         console.log(`Ikeda mode changed to: ${modeName}`);
     });
 
@@ -280,6 +283,9 @@ Module['onRuntimeInitialized'] = () => {
         elements.scrollOffsetX.value = "0.10";
         elements.scrollOffsetY.value = "0.00";
         
+        // Update UI for reset mode
+        updateUIForMode(1); // BLACK/WHITE mode
+        
         // Trigger all change events
         elements.ikedaMode.dispatchEvent(new Event('change'));
         elements.ikedaThreshold.dispatchEvent(new Event('input'));
@@ -298,7 +304,57 @@ Module['onRuntimeInitialized'] = () => {
     });
 
     // ------------------------------------------------------------------------
-    // 5) Keyboard Shortcuts (Ikeda Exhibition Mode)
+    // 5) Dynamic UI Updates Based on Mode
+    // ------------------------------------------------------------------------
+
+    function updateUIForMode(mode) {
+        // Get control row elements
+        const thresholdRow = elements.ikedaThreshold.closest('.control-row');
+        const gridSizeRow = elements.ikedaGridSize.closest('.control-row');
+        const dataIntensityRow = elements.ikedaDataIntensity.closest('.control-row');
+        
+        // Get label elements
+        const thresholdLabel = thresholdRow.querySelector('label');
+        const gridSizeLabel = gridSizeRow.querySelector('label');
+        const dataIntensityLabel = dataIntensityRow.querySelector('label');
+        
+        // Hide all controls initially
+        thresholdRow.style.display = 'none';
+        gridSizeRow.style.display = 'none';
+        dataIntensityRow.style.display = 'none';
+        
+        switch(mode) {
+            case 0: // NORMAL
+                // No special controls needed
+                break;
+                
+            case 1: // BLACK/WHITE
+                thresholdRow.style.display = 'flex';
+                thresholdLabel.textContent = 'B/W Threshold:';
+                break;
+                
+            case 2: // GRID
+                thresholdRow.style.display = 'flex';
+                gridSizeRow.style.display = 'flex';
+                thresholdLabel.textContent = 'Grid Threshold:';
+                gridSizeLabel.textContent = 'Grid Resolution:';
+                break;
+                
+            case 3: // DATA
+                thresholdRow.style.display = 'flex';
+                dataIntensityRow.style.display = 'flex';
+                thresholdLabel.textContent = 'Base Threshold:';
+                dataIntensityLabel.textContent = 'Data Overlay:';
+                break;
+                
+            case 4: // BINARY
+                // No controls needed - pure binary representation
+                break;
+        }
+    }
+
+    // ------------------------------------------------------------------------
+    // 6) Keyboard Shortcuts (Ikeda Exhibition Mode)
     // ------------------------------------------------------------------------
 
     document.addEventListener('keydown', (event) => {
@@ -307,14 +363,16 @@ Module['onRuntimeInitialized'] = () => {
             case '2':
             case '3':
             case '4':
-                const mode = event.key;
-                elements.ikedaMode.value = (parseInt(mode) - 1).toString();
+                const mode = parseInt(event.key) - 1;
+                elements.ikedaMode.value = mode.toString();
+                updateUIForMode(mode);
                 elements.ikedaMode.dispatchEvent(new Event('change'));
                 break;
                 
             case 'b':
             case 'B':
                 elements.ikedaMode.value = "1"; // Black/White mode
+                updateUIForMode(1);
                 elements.ikedaMode.dispatchEvent(new Event('change'));
                 break;
                 
@@ -350,7 +408,7 @@ Module['onRuntimeInitialized'] = () => {
     });
 
     // ------------------------------------------------------------------------
-    // 6) Data Display Updates
+    // 7) Data Display Updates
     // ------------------------------------------------------------------------
 
     function updateDataDisplay(analysisData) {
@@ -408,11 +466,15 @@ Module['onRuntimeInitialized'] = () => {
     }
 
     // ------------------------------------------------------------------------
-    // 7) Initialize Default Values
+    // 8) Initialize Default Values
     // ------------------------------------------------------------------------
     
     // Set initial values and trigger events
     setTimeout(() => {
+        // Initialize UI for default mode first
+        const initialMode = parseInt(elements.ikedaMode.value);
+        updateUIForMode(initialMode);
+        
         elements.ikedaMode.dispatchEvent(new Event('change'));
         elements.ikedaThreshold.dispatchEvent(new Event('input'));
         elements.ikedaGridSize.dispatchEvent(new Event('input'));
