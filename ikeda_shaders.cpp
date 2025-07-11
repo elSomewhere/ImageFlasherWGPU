@@ -274,6 +274,9 @@ struct ImageAnalysisData {
 };
 
 // Function to analyze image data for Ikeda visualization
+// NOTE: Commented out temporarily due to forward declaration issues
+// Will be re-implemented when ImageData struct is properly forward declared
+/*
 ImageAnalysisData analyzeImageForIkeda(const ImageData& image) {
     ImageAnalysisData data;
     
@@ -321,6 +324,7 @@ ImageAnalysisData analyzeImageForIkeda(const ImageData& image) {
     
     return data;
 }
+*/
 
 // Export functions for JavaScript control
 extern "C" {

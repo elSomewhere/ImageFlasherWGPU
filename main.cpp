@@ -31,6 +31,9 @@ main.cpp
 #define STB_IMAGE_RESIZE_IMPLEMENTATION
 #include "stb_image_resize.h"
 
+// Include Ikeda shaders
+#include "ikeda_shaders.cpp"
+
 // Error handler for WebGPU
 void HandleUncapturedError(WGPUErrorType type, const char* message, void* userdata) {
     emscripten_log(EM_LOG_ERROR, "Uncaptured WebGPU Error (%d): %s",
@@ -378,8 +381,8 @@ ImageFlasher::ImageFlasher(wgpu::Device dev, uint32_t ringSize, float switchInte
         : device_(dev),
           queue_(dev.GetQueue()),
           ringBufferSize_(ringSize),
-          bufferIndex_(0),
-          imageSwitchInterval_(switchInterval)
+          imageSwitchInterval_(switchInterval),
+          bufferIndex_(0)
 {
     for (int b = 0; b < 2; ++b) {
         writeIndex_[b]     = 0;
@@ -397,7 +400,7 @@ ImageFlasher::ImageFlasher(wgpu::Device dev, uint32_t ringSize, float switchInte
     sampler_ = device_.CreateSampler(&sd);
 
     // create a bind group layout
-    wgpu::BindGroupLayoutEntry bgle[3] = {};
+    wgpu::BindGroupLayoutEntry bgle[4] = {};
     bgle[0].binding = 0;
     bgle[0].visibility = wgpu::ShaderStage::Fragment;
     bgle[0].buffer.type = wgpu::BufferBindingType::Uniform;
@@ -412,8 +415,13 @@ ImageFlasher::ImageFlasher(wgpu::Device dev, uint32_t ringSize, float switchInte
     bgle[2].visibility = wgpu::ShaderStage::Fragment;
     bgle[2].sampler.type = wgpu::SamplerBindingType::Filtering;
 
+    bgle[3].binding = 3;
+    bgle[3].visibility = wgpu::ShaderStage::Fragment;
+    bgle[3].buffer.type = wgpu::BufferBindingType::Uniform;
+    bgle[3].buffer.minBindingSize = 32; // IkedaModeParams struct size
+
     wgpu::BindGroupLayoutDescriptor bglDesc = {};
-    bglDesc.entryCount = 3;
+    bglDesc.entryCount = 4;
     bglDesc.entries    = bgle;
 
     bindGroupLayout_ = device_.CreateBindGroupLayout(&bglDesc);
@@ -459,7 +467,7 @@ ImageFlasher::ImageFlasher(wgpu::Device dev, uint32_t ringSize, float switchInte
             tvd.dimension = wgpu::TextureViewDimension::e2DArray;
             textureViews_[b][i] = texArray.CreateView(&tvd);
 
-            wgpu::BindGroupEntry e[3] = {};
+            wgpu::BindGroupEntry e[4] = {};
             e[0].binding = 0;
             e[0].buffer  = uniformBuffers_[b];
             e[0].size    = 16;
@@ -467,10 +475,13 @@ ImageFlasher::ImageFlasher(wgpu::Device dev, uint32_t ringSize, float switchInte
             e[1].textureView = textureViews_[b][i];
             e[2].binding = 2;
             e[2].sampler = sampler_;
+            e[3].binding = 3;
+            e[3].buffer  = ikedaUniformBuffer;
+            e[3].size    = 32; // IkedaModeParams struct size
 
             wgpu::BindGroupDescriptor bgd = {};
             bgd.layout     = bindGroupLayout_;
-            bgd.entryCount = 3;
+            bgd.entryCount = 4;
             bgd.entries    = e;
             bindGroups_[b][i] = device_.CreateBindGroup(&bgd);
         }
@@ -615,7 +626,7 @@ void ImageFlasher::renderTiles(wgpu::RenderPassEncoder& pass, int tileFactor){
 
         queue_.WriteBuffer(ephemeralUB, 0, &uniformsData, sizeof(uniformsData));
 
-        wgpu::BindGroupEntry e[3] = {};
+        wgpu::BindGroupEntry e[4] = {};
         e[0].binding     = 0;
         e[0].buffer      = ephemeralUB;
         e[0].size        = sizeof(uniformsData);
@@ -623,10 +634,13 @@ void ImageFlasher::renderTiles(wgpu::RenderPassEncoder& pass, int tileFactor){
         e[1].textureView = textureViews_[front][arrIndex];
         e[2].binding     = 2;
         e[2].sampler     = sampler_;
+        e[3].binding     = 3;
+        e[3].buffer      = ikedaUniformBuffer;
+        e[3].size        = 32; // IkedaModeParams struct size
 
         wgpu::BindGroupDescriptor bgd = {};
         bgd.layout     = bindGroupLayout_;
-        bgd.entryCount = 3;
+        bgd.entryCount = 4;
         bgd.entries    = e;
         wgpu::BindGroup ephemeralBG = device_.CreateBindGroup(&bgd);
 
@@ -702,6 +716,14 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
         return;
     }
     swapChainFormat = scDesc.format;
+
+    // Create ikedaUniformBuffer before ImageFlasher constructor
+    {
+        wgpu::BufferDescriptor bd = {};
+        bd.size  = 8 * sizeof(float); // 1 int + 7 floats, aligned to 16 bytes
+        bd.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
+        ikedaUniformBuffer = device.CreateBuffer(&bd);
+    }
 
     // create the ImageFlasher
     imageFlasher = new ImageFlasher(device, 1024, /*imageSwitchInterval=*/1.0f/3);
@@ -814,7 +836,7 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
         {
             wgpu::BindGroup fadeBG = [&]{
                 wgpu::BindGroupLayout bgl = pipelineFade.GetBindGroupLayout(0);
-                wgpu::BindGroupEntry e[4] = {};
+                wgpu::BindGroupEntry e[5] = {};
                 e[0].binding     = 0; // oldFrame
                 e[0].textureView = oldFrameTempView;
                 e[1].binding     = 1; // newFrame
@@ -824,10 +846,13 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
                 e[2].size        = sizeof(float);
                 e[3].binding     = 3; // sampler
                 e[3].sampler     = commonSampler;
+                e[4].binding     = 4; // ikeda uniform
+                e[4].buffer      = ikedaUniformBuffer;
+                e[4].size        = 32; // IkedaModeParams struct size
 
                 wgpu::BindGroupDescriptor bd = {};
                 bd.layout     = bgl;
-                bd.entryCount = 4;
+                bd.entryCount = 5;
                 bd.entries    = e;
                 return device.CreateBindGroup(&bd);
             }();
@@ -853,7 +878,7 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
         {
             wgpu::BindGroup presentBG = [&] {
                 wgpu::BindGroupLayout bgl = pipelinePresent.GetBindGroupLayout(0);
-                wgpu::BindGroupEntry e[3] = {};
+                wgpu::BindGroupEntry e[4] = {};
                 e[0].binding      = 0;
                 e[0].textureView  = oldFrameView;
                 e[1].binding      = 1;
@@ -861,10 +886,13 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
                 e[2].binding      = 2;
                 e[2].buffer       = scrollUniformBuffer;
                 e[2].size         = 2*sizeof(float);
+                e[3].binding      = 3;
+                e[3].buffer       = ikedaUniformBuffer;
+                e[3].size         = 32; // IkedaModeParams struct size
 
                 wgpu::BindGroupDescriptor bd = {};
                 bd.layout     = bgl;
-                bd.entryCount = 3;
+                bd.entryCount = 4;
                 bd.entries    = e;
                 return device.CreateBindGroup(&bd);
             }();
@@ -1215,7 +1243,7 @@ void createPipelineCopy() {
 
 void createPipelineImageFlasher() {
     wgpu::ShaderModule vs = createShaderModule(vertexShaderWGSL);
-    wgpu::ShaderModule fs = createShaderModule(imageFlasherFragmentWGSL);
+    wgpu::ShaderModule fs = createShaderModule(ikedaImageFlasherFragmentWGSL);
     wgpu::PipelineLayout layout = imageFlasher->getPipelineLayout();
 
     wgpu::RenderPipelineDescriptor desc = {};
@@ -1243,9 +1271,9 @@ void createPipelineImageFlasher() {
 
 void createPipelineFade() {
     wgpu::ShaderModule vs = createShaderModule(vertexShaderWGSL);
-    wgpu::ShaderModule fs = createShaderModule(fadeFragmentWGSL);
+    wgpu::ShaderModule fs = createShaderModule(ikedaFadeFragmentWGSL);
 
-    wgpu::BindGroupLayoutEntry bglEntries[4] = {};
+    wgpu::BindGroupLayoutEntry bglEntries[5] = {};
     bglEntries[0].binding    = 0;
     bglEntries[0].visibility = wgpu::ShaderStage::Fragment;
     bglEntries[0].texture.sampleType    = wgpu::TextureSampleType::Float;
@@ -1264,8 +1292,13 @@ void createPipelineFade() {
     bglEntries[3].visibility = wgpu::ShaderStage::Fragment;
     bglEntries[3].sampler.type = wgpu::SamplerBindingType::Filtering;
 
+    bglEntries[4].binding    = 4;
+    bglEntries[4].visibility = wgpu::ShaderStage::Fragment;
+    bglEntries[4].buffer.type= wgpu::BufferBindingType::Uniform;
+    bglEntries[4].buffer.minBindingSize = 32; // IkedaModeParams struct size
+
     wgpu::BindGroupLayoutDescriptor bglDesc = {};
-    bglDesc.entryCount = 4;
+    bglDesc.entryCount = 5;
     bglDesc.entries    = bglEntries;
     wgpu::BindGroupLayout fadeBGL = device.CreateBindGroupLayout(&bglDesc);
 
@@ -1310,9 +1343,9 @@ void createPipelineFade() {
 
 void createPipelinePresent() {
     wgpu::ShaderModule vs = createShaderModule(vertexShaderWGSL);
-    wgpu::ShaderModule fs = createShaderModule(presentFragmentWGSL);
+    wgpu::ShaderModule fs = createShaderModule(ikedaPresentFragmentWGSL);
 
-    wgpu::BindGroupLayoutEntry bglEntries[3] = {};
+    wgpu::BindGroupLayoutEntry bglEntries[4] = {};
     // oldFrame
     bglEntries[0].binding    = 0;
     bglEntries[0].visibility = wgpu::ShaderStage::Fragment;
@@ -1329,8 +1362,14 @@ void createPipelinePresent() {
     bglEntries[2].visibility = wgpu::ShaderStage::Fragment;
     bglEntries[2].buffer.type= wgpu::BufferBindingType::Uniform;
 
+    // ikeda uniform
+    bglEntries[3].binding    = 3;
+    bglEntries[3].visibility = wgpu::ShaderStage::Fragment;
+    bglEntries[3].buffer.type= wgpu::BufferBindingType::Uniform;
+    bglEntries[3].buffer.minBindingSize = 32; // IkedaModeParams struct size
+
     wgpu::BindGroupLayoutDescriptor bglDesc = {};
-    bglDesc.entryCount = 3;
+    bglDesc.entryCount = 4;
     bglDesc.entries    = bglEntries;
     wgpu::BindGroupLayout presentBGL = device.CreateBindGroupLayout(&bglDesc);
 
@@ -1372,14 +1411,6 @@ void createPipelinePresent() {
         queue.WriteBuffer(scrollUniformBuffer, 0, init, sizeof(init));
     }
 
-    // create ikedaUniformBuffer
-    {
-        wgpu::BufferDescriptor bd = {};
-        bd.size  = 8 * sizeof(float); // 1 int + 7 floats, aligned to 16 bytes
-        bd.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-        ikedaUniformBuffer = device.CreateBuffer(&bd);
-
-        // Initialize with default values
-        updateIkedaUniforms();
-    }
+    // Initialize ikedaUniformBuffer with default values (buffer created earlier)
+    updateIkedaUniforms();
 }
