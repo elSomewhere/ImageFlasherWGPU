@@ -24,14 +24,14 @@ Module['onRuntimeInitialized'] = () => {
         let byteArray = new Uint8Array(event.data);
 
         // Allocate memory in WASM heap
-        let ptr = Module._malloc(byteArray.length);
+        let ptr = Module['_malloc'](byteArray.length);
         Module.HEAPU8.set(byteArray, ptr);
 
         // Forward to C++: onImageReceived(uint8_t* data, int length)
         Module.ccall('onImageReceived', null, ['number', 'number'], [ptr, byteArray.length]);
 
         // Free the temporary buffer
-        Module._free(ptr);
+        Module['_free'](ptr);
     };
 
     // ------------------------------------------------------------------------
