@@ -125,6 +125,16 @@ Module['onRuntimeInitialized'] = () => {
         uploadsSlider: document.getElementById('uploadsSlider'),
         uploadsValue: document.getElementById('uploadsValue'),
         
+        // Scrolling controls
+        scrollSpeedX: document.getElementById('scrollSpeedX'),
+        scrollSpeedXVal: document.getElementById('scrollSpeedXVal'),
+        scrollSpeedY: document.getElementById('scrollSpeedY'),
+        scrollSpeedYVal: document.getElementById('scrollSpeedYVal'),
+        scrollOffsetX: document.getElementById('scrollOffsetX'),
+        scrollOffsetXVal: document.getElementById('scrollOffsetXVal'),
+        scrollOffsetY: document.getElementById('scrollOffsetY'),
+        scrollOffsetYVal: document.getElementById('scrollOffsetYVal'),
+        
         // Buttons
         updateBufferUsageBtn: document.getElementById('updateBufferUsage'),
         resetSystemBtn: document.getElementById('resetSystem'),
@@ -218,6 +228,35 @@ Module['onRuntimeInitialized'] = () => {
         setMaxUploadsPerFrame(val);
     });
 
+    // Scrolling controls
+    elements.scrollSpeedX.addEventListener('input', () => {
+        const val = parseFloat(elements.scrollSpeedX.value);
+        elements.scrollSpeedXVal.textContent = val.toFixed(2);
+        const speedY = parseFloat(elements.scrollSpeedY.value);
+        setScrollingSpeed(val, speedY);
+    });
+
+    elements.scrollSpeedY.addEventListener('input', () => {
+        const val = parseFloat(elements.scrollSpeedY.value);
+        elements.scrollSpeedYVal.textContent = val.toFixed(2);
+        const speedX = parseFloat(elements.scrollSpeedX.value);
+        setScrollingSpeed(speedX, val);
+    });
+
+    elements.scrollOffsetX.addEventListener('input', () => {
+        const val = parseFloat(elements.scrollOffsetX.value);
+        elements.scrollOffsetXVal.textContent = val.toFixed(2);
+        const oy = parseFloat(elements.scrollOffsetY.value);
+        setScrollingOffset(val, oy);
+    });
+
+    elements.scrollOffsetY.addEventListener('input', () => {
+        const val = parseFloat(elements.scrollOffsetY.value);
+        elements.scrollOffsetYVal.textContent = val.toFixed(2);
+        const ox = parseFloat(elements.scrollOffsetX.value);
+        setScrollingOffset(ox, val);
+    });
+
     // Buffer usage button
     elements.updateBufferUsageBtn.addEventListener('click', () => {
         const usage = getBufferUsage();
@@ -236,6 +275,10 @@ Module['onRuntimeInitialized'] = () => {
         elements.switchSlider.value = "0.33";
         elements.tileSlider.value = "3";
         elements.uploadsSlider.value = "0";
+        elements.scrollSpeedX.value = "0.1";
+        elements.scrollSpeedY.value = "0.00";
+        elements.scrollOffsetX.value = "0.10";
+        elements.scrollOffsetY.value = "0.00";
         
         // Trigger all change events
         elements.ikedaMode.dispatchEvent(new Event('change'));
@@ -246,6 +289,10 @@ Module['onRuntimeInitialized'] = () => {
         elements.switchSlider.dispatchEvent(new Event('input'));
         elements.tileSlider.dispatchEvent(new Event('input'));
         elements.uploadsSlider.dispatchEvent(new Event('input'));
+        elements.scrollSpeedX.dispatchEvent(new Event('input'));
+        elements.scrollSpeedY.dispatchEvent(new Event('input'));
+        elements.scrollOffsetX.dispatchEvent(new Event('input'));
+        elements.scrollOffsetY.dispatchEvent(new Event('input'));
         
         console.log("System reset to defaults");
     });
@@ -374,6 +421,10 @@ Module['onRuntimeInitialized'] = () => {
         elements.switchSlider.dispatchEvent(new Event('input'));
         elements.tileSlider.dispatchEvent(new Event('input'));
         elements.uploadsSlider.dispatchEvent(new Event('input'));
+        elements.scrollSpeedX.dispatchEvent(new Event('input'));
+        elements.scrollSpeedY.dispatchEvent(new Event('input'));
+        elements.scrollOffsetX.dispatchEvent(new Event('input'));
+        elements.scrollOffsetY.dispatchEvent(new Event('input'));
         
         console.log("Ikeda control system initialized");
         updateStatusBar("DATA.MATRIX READY", "#FFFFFF");
