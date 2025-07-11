@@ -216,29 +216,6 @@ fn luminance(color: vec3<f32>) -> f32 {
     return dot(color, vec3<f32>(0.299, 0.587, 0.114));
 }
 
-// Generate overlay text/data patterns
-fn generateOverlayPattern(uv: vec2<f32>, time: f32) -> f32 {
-    // Top bar: FPS and metrics
-    if (uv.y > 0.95) {
-        let textCoord = uv.x * 20.0;
-        return step(0.5, fract(textCoord + time));
-    }
-    
-    // Bottom bar: Data stream
-    if (uv.y < 0.05) {
-        let streamCoord = uv.x * 100.0 - time * 50.0;
-        return step(0.3, fract(streamCoord));
-    }
-    
-    // Side data columns
-    if (uv.x < 0.05 || uv.x > 0.95) {
-        let dataCoord = uv.y * 50.0 - time * 10.0;
-        return step(0.6, fract(dataCoord));
-    }
-    
-    return 0.0;
-}
-
 @fragment
 fn fsPresent(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
     let uvShifted = fract(uv + scrollParam.offset);
@@ -252,11 +229,8 @@ fn fsPresent(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
     let lum = luminance(baseColor.rgb);
     let blackWhite = step(ikeda.threshold, lum);
     
-    // Add data overlay patterns
-    let overlayPattern = generateOverlayPattern(uv, ikeda.time);
-    let finalValue = max(blackWhite, overlayPattern * ikeda.dataIntensity);
-    
-    return vec4<f32>(finalValue, finalValue, finalValue, baseColor.a);
+    // No edge overlay patterns - just return the black & white conversion
+    return vec4<f32>(blackWhite, blackWhite, blackWhite, baseColor.a);
 }
 )";
 
