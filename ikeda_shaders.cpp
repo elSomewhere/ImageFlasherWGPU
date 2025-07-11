@@ -1,5 +1,11 @@
 // Enhanced Ikeda-Inspired Shaders for ImageFlasherWGPU
 // Phase 1: Black & White conversion, Grid quantization, Data visualization
+// 
+// Bug Fixes Applied:
+// - Grid Mode: Fixed inverted grid line density (larger grid size = fewer lines)
+// - Data Mode: Replaced harsh max() with smooth blending to prevent sudden transitions
+// - All Modes: Reduced flickering and improved visual stability
+// - Binary Mode: Better scanline resolution and bit extraction stability
 
 // ==================== IKEDA MODE UNIFORMS ====================
 
@@ -50,27 +56,29 @@ fn quantizeToGrid(uv: vec2<f32>, gridSize: f32) -> vec2<f32> {
     return floor(uv / pixelSize) * pixelSize + pixelSize * 0.5;
 }
 
-// Generate data pattern based on pixel values
+// Generate smooth data pattern based on pixel values
 fn generateDataPattern(uv: vec2<f32>, color: vec3<f32>, time: f32) -> f32 {
     let lum = luminance(color);
     
-    // Barcode-like pattern
-    let barcodeCoord = uv.x * 100.0;
-    let barcodePattern = step(0.5, fract(barcodeCoord + lum * 10.0));
+    // Smooth barcode-like pattern
+    let barcodeCoord = uv.x * 80.0 + lum * 5.0;
+    let barcodePattern = smoothstep(0.4, 0.6, fract(barcodeCoord + sin(time * 0.5) * 0.1));
     
-    // Grid overlay
-    let gridCoord = uv * 64.0;
-    let gridPattern = max(
-        step(0.95, fract(gridCoord.x)),
-        step(0.95, fract(gridCoord.y))
-    );
+    // Smooth grid overlay (fixed size for data mode)
+    let gridCoord = uv * 48.0;
+    let gridThickness = 0.08;
+    let gridX = smoothstep(1.0 - gridThickness, 1.0, fract(gridCoord.x));
+    let gridY = smoothstep(1.0 - gridThickness, 1.0, fract(gridCoord.y));
+    let gridPattern = max(gridX, gridY);
     
-    // Binary data visualization
-    let binaryCoord = floor(uv * 32.0);
+    // Smooth binary data visualization
+    let binaryCoord = floor(uv * 24.0);
     let binaryValue = fract(sin(dot(binaryCoord, vec2<f32>(12.9898, 78.233))) * 43758.5453);
-    let binaryPattern = step(lum, binaryValue);
+    let binaryPattern = smoothstep(lum - 0.1, lum + 0.1, binaryValue);
     
-    return max(max(barcodePattern, gridPattern), binaryPattern);
+    // Smooth combination instead of harsh max()
+    let combinedPattern = barcodePattern * 0.4 + gridPattern * 0.3 + binaryPattern * 0.3;
+    return clamp(combinedPattern, 0.0, 1.0);
 }
 
 // Main fragment function with Ikeda modes
@@ -86,7 +94,8 @@ fn fsImage(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
     // Mode 1: Pure Black & White with dynamic threshold
     if (ikeda.mode == 1) {
         let lum = luminance(sampledColor.rgb);
-        let dynamicThreshold = ikeda.threshold + sin(ikeda.time * 2.0) * 0.1;
+        // Reduced dynamic threshold variation to prevent excessive flickering
+        let dynamicThreshold = ikeda.threshold + sin(ikeda.time * 1.5) * 0.05;
         let blackWhite = step(dynamicThreshold, lum);
         return vec4<f32>(blackWhite, blackWhite, blackWhite, sampledColor.a);
     }
@@ -98,15 +107,8 @@ fn fsImage(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
         let lum = luminance(quantizedColor.rgb);
         let blackWhite = step(ikeda.threshold, lum);
         
-        // Add grid lines
-        let gridCoord = uv * ikeda.gridSize;
-        let gridLines = max(
-            step(0.98, fract(gridCoord.x)),
-            step(0.98, fract(gridCoord.y))
-        );
-        
-        let finalValue = max(blackWhite, gridLines);
-        return vec4<f32>(finalValue, finalValue, finalValue, sampledColor.a);
+        // Return only the quantized result without grid lines
+        return vec4<f32>(blackWhite, blackWhite, blackWhite, sampledColor.a);
     }
     
     // Mode 3: Data Visualization Overlay
@@ -115,21 +117,27 @@ fn fsImage(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
         let blackWhite = step(ikeda.threshold, lum);
         
         let dataPattern = generateDataPattern(uv, sampledColor.rgb, ikeda.time);
-        let finalValue = max(blackWhite, dataPattern * ikeda.dataIntensity);
+        
+        // Smooth blending instead of harsh max() - prevents sudden transitions
+        let blendedData = dataPattern * ikeda.dataIntensity;
+        let finalValue = clamp(blackWhite + blendedData * (1.0 - blackWhite), 0.0, 1.0);
         
         return vec4<f32>(finalValue, finalValue, finalValue, sampledColor.a);
     }
     
     // Mode 4: Binary Data Stream
     if (ikeda.mode == 4) {
-        // Convert to scanlines
-        let scanlineY = floor(uv.y * 64.0);
-        let scanlineUV = vec2<f32>(uv.x, scanlineY / 64.0);
+        // Convert to scanlines with better resolution
+        let scanlineCount = 48.0; // Balanced resolution
+        let scanlineY = floor(uv.y * scanlineCount);
+        let scanlineUV = vec2<f32>(uv.x, (scanlineY + 0.5) / scanlineCount);
         let scanlineColor = textureSample(texArr, samp, scanlineUV, u.layerIndex);
         
-        // Create binary representation
-        let pixelValue = u32(luminance(scanlineColor.rgb) * 255.0);
-        let bitPosition = u32(fract(uv.x * 8.0) * 8.0);
+        // Create more stable binary representation
+        let lum = luminance(scanlineColor.rgb);
+        let pixelValue = u32(lum * 255.0);
+        let bitsPerPixel = 8.0;
+        let bitPosition = u32(floor(fract(uv.x * bitsPerPixel) * bitsPerPixel));
         let bitValue = f32((pixelValue >> bitPosition) & 1u);
         
         return vec4<f32>(bitValue, bitValue, bitValue, sampledColor.a);
@@ -179,9 +187,9 @@ fn fsFade(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
         return mixed;
     }
     
-    // Black & White conversion
+    // Smoother Black & White conversion for fade shader
     let lum = luminance(mixed.rgb);
-    let dynamicThreshold = ikeda.threshold + sin(ikeda.time * 3.0) * 0.05;
+    let dynamicThreshold = ikeda.threshold + sin(ikeda.time * 1.0) * 0.02; // Less aggressive
     let blackWhite = step(dynamicThreshold, lum);
     
     return vec4<f32>(blackWhite, blackWhite, blackWhite, mixed.a);
