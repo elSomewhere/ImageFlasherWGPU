@@ -1,0 +1,1 @@
+/Users/estebanlanter/CLionProjects/emsdk/upstream/emscripten/em++ -s USE_WEBGPU=1 -s WASM=1 -s ALLOW_MEMORY_GROWTH=1 -s INITIAL_MEMORY=64MB -s MAXIMUM_MEMORY=512MB -s EXPORTED_FUNCTIONS=['_main','_malloc','_free'] -s EXPORTED_RUNTIME_METHODS=['ccall','cwrap'] -s ENVIRONMENT=web -s MODULARIZE=1 -s EXPORT_NAME='Module' --bind -O3 @CMakeFiles/index.dir/objects1.rsp -o index.js 

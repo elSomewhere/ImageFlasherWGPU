@@ -9,12 +9,11 @@ set(CMAKE_CXX_COMPILER em++)
 
 include_directories(extern/glm EXCLUDE_FROM_ALL)
 
-
-# Set the source files
+# Set the source files with new structure
 set(SOURCES
-        main.cpp
-        stb_image.h
-        stb_image_resize.h
+        src/cpp/main.cpp
+        src/cpp/stb_image.h
+        src/cpp/stb_image_resize.h
 )
 
 # Add the executable
@@ -61,20 +60,27 @@ target_link_options(index PRIVATE
         -gsource-map --source-map-base http://localhost:8000/
 )
 
-# Copy HTML, JS, and Python files to the build directory
-configure_file(index.html index.html COPYONLY)
-configure_file(app.js app.js COPYONLY)
-configure_file(index_ikeda.html index_ikeda.html COPYONLY)
-configure_file(app_ikeda.js app_ikeda.js COPYONLY)
-configure_file(serve.py serve.py COPYONLY)
+# Copy files to public directory (for Node.js structure)
+configure_file(public/index.html public/index.html COPYONLY)
+configure_file(public/app.js public/app.js COPYONLY)
 
 # Conditionally set file system related flags
 set(USE_FILE_SYSTEM 1) # Set this to 1 to enable file-system
 
 target_link_options(index PRIVATE --no-heap-copy)
 
-# Custom target for serving the web directory
+# Custom target for building and copying assets to public directory
+add_custom_target(copy_assets ALL
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_BINARY_DIR}/index.js ${CMAKE_CURRENT_SOURCE_DIR}/public/index.js
+    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_BINARY_DIR}/index.wasm ${CMAKE_CURRENT_SOURCE_DIR}/public/index.wasm
+    DEPENDS index
+    COMMENT "Copying WASM assets to public directory"
+)
+
+# Custom target for Node.js development
 add_custom_target(serve
-        COMMAND python3 -m http.server -d ${CMAKE_CURRENT_BINARY_DIR}
-        DEPENDS index
+        COMMAND node server.js --ikeda
+        DEPENDS copy_assets
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        COMMENT "Starting Node.js server"
 )
