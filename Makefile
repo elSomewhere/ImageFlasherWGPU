@@ -51,7 +51,7 @@ rebuild-reddit: stop build start-reddit
 # Stop running servers
 stop:
 	@echo "$(YELLOW)🛑 Stopping servers...$(NC)"
-	@-pkill -f "launcher.py" 2>/dev/null || true
+	@-pkill -f "node server.js" 2>/dev/null || true
 	@-pkill -f "scraper" 2>/dev/null || true
 	@-lsof -ti:$(WEB_PORT) | xargs kill 2>/dev/null || true
 	@-lsof -ti:$(WEBSOCKET_PORT) | xargs kill 2>/dev/null || true
@@ -74,34 +74,31 @@ build:
 # Start the regular application
 start:
 	@echo "$(YELLOW)🚀 Starting ImageFlasherWGPU (Regular Version)...$(NC)"
-	@echo "$(YELLOW)🌐 Regular interface: http://localhost:$(WEB_PORT)$(NC)"
-	@echo "$(YELLOW)🎨 Ikeda interface: http://localhost:$(WEB_PORT)/index_ikeda.html$(NC)"
+	@echo "$(YELLOW)🌐 Ikeda interface: http://localhost:$(WEB_PORT)$(NC)"
 	@echo "$(YELLOW)📡 WebSocket server will run on port: $(WEBSOCKET_PORT)$(NC)"
 	@echo "$(YELLOW)⏹️  Press Ctrl+C to stop when ready$(NC)"
 	@echo ""
-	@python3 launcher.py --generated
+	@node server.js --generated
 
 # Start the Ikeda version (enhanced data aesthetics)
 start-ikeda:
 	@echo "$(YELLOW)🚀 Starting ImageFlasherWGPU (Ikeda Version)...$(NC)"
-	@echo "$(YELLOW)🎨 Ikeda interface: http://localhost:$(WEB_PORT)/index_ikeda.html$(NC)"
-	@echo "$(YELLOW)🌐 Regular interface: http://localhost:$(WEB_PORT)$(NC)"
+	@echo "$(YELLOW)🎨 Ikeda interface: http://localhost:$(WEB_PORT)$(NC)"
 	@echo "$(YELLOW)📡 WebSocket server will run on port: $(WEBSOCKET_PORT)$(NC)"
 	@echo "$(YELLOW)✨ Features: Data matrix visualization, B/W modes, grid analysis$(NC)"
 	@echo "$(YELLOW)⏹️  Press Ctrl+C to stop when ready$(NC)"
 	@echo ""
-	@python3 launcher.py --generated
+	@node server.js --ikeda
 
 # Start the Reddit crawler version
 start-reddit:
 	@echo "$(YELLOW)🚀 Starting ImageFlasherWGPU (Reddit Crawler Version)...$(NC)"
-	@echo "$(YELLOW)🌐 Regular interface: http://localhost:$(WEB_PORT)$(NC)"
-	@echo "$(YELLOW)🎨 Ikeda interface: http://localhost:$(WEB_PORT)/index_ikeda.html$(NC)"
+	@echo "$(YELLOW)🌐 Ikeda interface: http://localhost:$(WEB_PORT)$(NC)"
 	@echo "$(YELLOW)📡 WebSocket server will run on port: $(WEBSOCKET_PORT)$(NC)"
 	@echo "$(YELLOW)🔍 Source: Live Reddit image scraping$(NC)"
 	@echo "$(YELLOW)⏹️  Press Ctrl+C to stop when ready$(NC)"
 	@echo ""
-	@python3 launcher.py --reddit
+	@node server.js --reddit
 
 # Start Reddit crawler with specific subreddit
 start-reddit-subreddit:
@@ -111,13 +108,12 @@ start-reddit-subreddit:
 		exit 1; \
 	fi
 	@echo "$(YELLOW)🚀 Starting ImageFlasherWGPU (Reddit r/$(SUBREDDIT))...$(NC)"
-	@echo "$(YELLOW)🌐 Regular interface: http://localhost:$(WEB_PORT)$(NC)"
-	@echo "$(YELLOW)🎨 Ikeda interface: http://localhost:$(WEB_PORT)/index_ikeda.html$(NC)"
+	@echo "$(YELLOW)🌐 Ikeda interface: http://localhost:$(WEB_PORT)$(NC)"
 	@echo "$(YELLOW)📡 WebSocket server will run on port: $(WEBSOCKET_PORT)$(NC)"
 	@echo "$(YELLOW)🔍 Source: Reddit r/$(SUBREDDIT)$(NC)"
 	@echo "$(YELLOW)⏹️  Press Ctrl+C to stop when ready$(NC)"
 	@echo ""
-	@python3 launcher.py --reddit --subreddit $(SUBREDDIT)
+	@node server.js --reddit --subreddit $(SUBREDDIT)
 
 # Clean build artifacts
 clean: stop

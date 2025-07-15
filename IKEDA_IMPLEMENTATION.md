@@ -19,11 +19,11 @@ Your ImageFlasherWGPU has been enhanced with a **Ryoji Ikeda-inspired data visua
 - **`CONCEPT.md`** - Updated conceptual framework
 - **`IKEDA_IMPLEMENTATION.md`** - This implementation guide
 
-### **2. Enhanced Launcher**
+### **2. Node.js Integration**
 
-The `launcher.py` now supports:
+The Node.js server now supports:
 ```bash
-python3 launcher.py --ikeda    # Launch Ikeda mode
+node server.js --ikeda    # Launch Ikeda mode
 ```
 
 ---
@@ -237,11 +237,11 @@ Metadata includes full analysis data for real-time visualization.
 ### **Basic Usage**
 ```bash
 # Default Ikeda mode with data visualization
-python3 launcher.py --ikeda
+node server.js --ikeda
 
 # Original modes still available
-python3 launcher.py --generated
-python3 launcher.py --reddit --subreddit art
+node server.js --generated
+node server.js --reddit --subreddit art
 ```
 
 ### **Interface Access**
@@ -313,7 +313,7 @@ python3 launcher.py --reddit --subreddit art
 
 ### **Gallery Installation**
 ```bash
-python3 launcher.py --ikeda
+node server.js --ikeda
 # Navigate to http://localhost:8000
 # Press ESC for fullscreen
 # Use number keys 1-4 for live mode switching
@@ -321,7 +321,7 @@ python3 launcher.py --ikeda
 
 ### **Development/Testing**
 ```bash
-python3 launcher.py --ikeda
+node server.js --ikeda
 # Full interface visible
 # Real-time data analysis in right panel
 # All controls accessible
@@ -329,7 +329,7 @@ python3 launcher.py --ikeda
 
 ### **Reddit Data Analysis**
 ```bash
-python3 launcher.py --reddit --subreddit art
+node server.js --reddit --subreddit art
 # Use original interface with enhanced Ikeda processing
 # Real-world image analysis instead of generated patterns
 ```
@@ -365,7 +365,7 @@ From simple black & white conversion to complex wave interference patterns, from
 ## **Launch Command**
 
 ```bash
-python3 launcher.py --ikeda
+node server.js --ikeda
 ```
 
 **Welcome to the expanded data landscape with 13 modes of information visualization.** 

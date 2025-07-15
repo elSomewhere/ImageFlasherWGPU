@@ -103,7 +103,7 @@ Open `http://localhost:8000` to access the **Data.Matrix** interface featuring:
 │   └── python/         # Python image servers
 │       ├── ImageCreator_Ikeda.py  # Ikeda data server
 │       ├── scraper_3.py           # Reddit scraper
-│       └── launcher.py            # Legacy launcher
+
 ├── server.js           # Node.js server (main entry point)
 ├── package.json        # Node.js dependencies & scripts
 └── CMakeLists.txt      # Emscripten build configuration
