@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Data.Matrix - Enhanced Image Processing</title>
+  <style>
+    /* Ryoji Ikeda inspired minimalist aesthetic */
+    html, body {
+      margin: 0;
+      padding: 0;
+      background-color: #000000;
+      color: #FFFFFF;
+      font-family: "Courier New", "Monaco", "Lucida Console", monospace;
+      overflow: hidden;
+      font-size: 10px;
+      line-height: 1.2;
+    }
+
+    /* Control panel - minimal and data-focused */
+    #controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.9);
+      border: 1px solid #FFFFFF;
+      padding: 8px;
+      z-index: 10;
+      width: 320px;
+      font-size: 9px;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+
+    /* Header styling */
+    .control-header {
+      font-size: 11px;
+      font-weight: bold;
+      margin-bottom: 8px;
+      text-align: center;
+      border-bottom: 1px solid #FFFFFF;
+      padding-bottom: 4px;
+    }
+
+    /* Section headers */
+    .section-header {
+      font-size: 10px;
+      font-weight: bold;
+      margin: 8px 0 4px 0;
+      color: #FFFFFF;
+      text-transform: uppercase;
+      border-bottom: 1px solid #333;
+      padding-bottom: 2px;
+    }
+
+    /* Control rows */
+    .control-row {
+      margin-bottom: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .control-row label {
+      width: 130px;
+      font-size: 9px;
+    }
+
+    .control-row input[type="range"] {
+      width: 80px;
+      height: 12px;
+      background: #000000;
+      border: 1px solid #FFFFFF;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+
+    .control-row input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 8px;
+      height: 12px;
+      background: #FFFFFF;
+      cursor: pointer;
+    }
+
+    .control-row input[type="range"]::-moz-range-thumb {
+      width: 8px;
+      height: 12px;
+      background: #FFFFFF;
+      cursor: pointer;
+      border: none;
+    }
+
+    /* Select styling */
+    .control-row select {
+      width: 85px;
+      background: #000000;
+      color: #FFFFFF;
+      border: 1px solid #FFFFFF;
+      font-size: 9px;
+      font-family: inherit;
+    }
+
+    /* Value display */
+    .value-display {
+      width: 40px;
+      text-align: right;
+      font-size: 8px;
+      font-family: inherit;
+    }
+
+    /* Button styling */
+    button {
+      background: #000000;
+      color: #FFFFFF;
+      border: 1px solid #FFFFFF;
+      padding: 4px 8px;
+      font-size: 9px;
+      font-family: inherit;
+      cursor: pointer;
+      margin: 2px;
+    }
+
+    button:hover {
+      background: #FFFFFF;
+      color: #000000;
+    }
+
+    /* Mode-specific controls - initially hidden */
+    .mode-controls {
+      display: none;
+      margin-top: 4px;
+      padding: 4px;
+      border: 1px solid #333;
+    }
+
+    .mode-controls.active {
+      display: block;
+    }
+
+    /* Data display area */
+    #dataDisplay {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      background: rgba(0, 0, 0, 0.9);
+      border: 1px solid #FFFFFF;
+      padding: 8px;
+      z-index: 10;
+      width: 200px;
+      font-size: 8px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .data-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 2px;
+    }
+
+    .data-label {
+      color: #FFFFFF;
+    }
+
+    .data-value {
+      color: #FFFFFF;
+      font-weight: bold;
+    }
+
+    /* Status bar */
+    #statusBar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 20px;
+      background: rgba(0, 0, 0, 0.9);
+      border-top: 1px solid #FFFFFF;
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+      font-size: 8px;
+      z-index: 10;
+    }
+
+    /* Canvas styling */
+    #canvas {
+      width: 100vw;
+      height: 100vh;
+      display: block;
+      background-color: #000000;
+    }
+
+    /* Keyboard shortcuts display */
+    #shortcuts {
+      position: absolute;
+      bottom: 25px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.9);
+      border: 1px solid #FFFFFF;
+      padding: 8px;
+      z-index: 10;
+      font-size: 8px;
+      width: 220px;
+    }
+
+    .shortcut-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 2px;
+    }
+
+    /* Mode indicator */
+    #modeIndicator {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      font-size: 24px;
+      font-weight: bold;
+      color: #FFFFFF;
+      z-index: 15;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s;
+    }
+
+    /* Flashing animation for mode changes */
+    .mode-flash {
+      opacity: 1 !important;
+      animation: flash 1s ease-out;
+    }
+
+    @keyframes flash {
+      0% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    /* Scrollbar styling for webkit browsers */
+    #controls::-webkit-scrollbar {
+      width: 6px;
+    }
+
+    #controls::-webkit-scrollbar-track {
+      background: #000000;
+    }
+
+    #controls::-webkit-scrollbar-thumb {
+      background: #FFFFFF;
+      border: 1px solid #000000;
+    }
+  </style>
+</head>
+<body>
+
+<div id="controls">
+  <div class="control-header">DATA.MATRIX.ENHANCED</div>
+  
+  <!-- Preprocessing Section -->
+  <div class="section-header">Preprocessing</div>
+  <div class="control-row">
+    <label>Color Mode:</label>
+    <select id="preprocessingMode">
+      <option value="0">COLOR</option>
+      <option value="1" selected>BLACK/WHITE</option>
+    </select>
+  </div>
+
+  <div class="control-row" id="thresholdRow">
+    <label>Threshold:</label>
+    <input type="range" id="ikedaThreshold" min="0" max="1" step="0.01" value="0.5">
+    <span id="thresholdValue" class="value-display">0.50</span>
+  </div>
+
+  <!-- Enhanced Black/White Controls -->
+  <div class="mode-controls" id="blackWhiteControls">
+    <div class="control-row">
+      <label>Contrast Boost:</label>
+      <input type="range" id="contrastBoost" min="0.5" max="3.0" step="0.1" value="1.5">
+      <span id="contrastBoostValue" class="value-display">1.5</span>
+    </div>
+    <div class="control-row">
+      <label>Adaptive Radius:</label>
+      <input type="range" id="adaptiveRadius" min="1" max="20" step="1" value="5">
+      <span id="adaptiveRadiusValue" class="value-display">5</span>
+    </div>
+    <div class="control-row">
+      <label>Smoothing:</label>
+      <input type="range" id="thresholdSmoothing" min="0" max="0.1" step="0.01" value="0.02">
+      <span id="thresholdSmoothingValue" class="value-display">0.02</span>
+    </div>
+  </div>
+
+  <!-- Color Mode Controls -->
+  <div class="mode-controls" id="colorControls">
+    <div class="control-row">
+      <label>Color Intensity:</label>
+      <input type="range" id="colorIntensity" min="0" max="2" step="0.01" value="1.0">
+      <span id="colorIntensityValue" class="value-display">1.00</span>
+    </div>
+  </div>
+
+  <!-- Postprocessing Mode Selection -->
+  <div class="section-header">Processing Mode</div>
+  <div class="control-row">
+    <label>Mode:</label>
+    <select id="postprocessingMode">
+      <option value="0">NONE</option>
+      <option value="1">GRID</option>
+      <option value="2" selected>EDGES</option>
+      <option value="3">BINARY</option>
+      <option value="4">CHANNELS</option>
+      <option value="5">PIXELATION</option>
+      <option value="6">DISPLACEMENT</option>
+      <option value="7">STRIPS</option>
+      <option value="8">QUANTUM</option>
+    </select>
+  </div>
+
+  <!-- Global Effect Intensity -->
+  <div class="control-row">
+    <label>Effect Intensity:</label>
+    <input type="range" id="dataIntensity" min="0" max="1" step="0.01" value="0.7">
+    <span id="dataIntensityValue" class="value-display">0.70</span>
+  </div>
+
+  <!-- Mode-Specific Controls -->
+  
+  <!-- Grid Mode Controls -->
+  <div class="mode-controls" id="gridControls">
+    <div class="control-row">
+      <label>Grid Size:</label>
+      <input type="range" id="gridSize" min="8" max="128" step="4" value="32">
+      <span id="gridSizeValue" class="value-display">32</span>
+    </div>
+    <div class="control-row">
+      <label>Grid Rotation:</label>
+      <input type="range" id="gridRotation" min="0" max="6.28" step="0.1" value="0">
+      <span id="gridRotationValue" class="value-display">0.0</span>
+    </div>
+    <div class="control-row">
+      <label>Grid Aspect:</label>
+      <input type="range" id="gridAspect" min="0.5" max="2.0" step="0.1" value="1.0">
+      <span id="gridAspectValue" class="value-display">1.0</span>
+    </div>
+  </div>
+
+  <!-- Edge Detection Controls -->
+  <div class="mode-controls" id="edgeControls">
+    <div class="control-row">
+      <label>Edge Sensitivity:</label>
+      <input type="range" id="edgeSensitivity" min="0.5" max="5.0" step="0.1" value="2.0">
+      <span id="edgeSensitivityValue" class="value-display">2.0</span>
+    </div>
+  </div>
+
+  <!-- Binary Data Controls -->
+  <div class="mode-controls" id="binaryControls">
+    <div class="control-row">
+      <label>Scanline Count:</label>
+      <input type="range" id="binaryScanlines" min="16" max="128" step="4" value="48">
+      <span id="binaryScanlinesValue" class="value-display">48</span>
+    </div>
+  </div>
+
+  <!-- Channel Manipulation Controls -->
+  <div class="mode-controls" id="channelControls">
+    <div class="control-row">
+      <label>Channel Offset X:</label>
+      <input type="range" id="channelOffsetX" min="-5" max="5" step="0.1" value="1.0">
+      <span id="channelOffsetXValue" class="value-display">1.0</span>
+    </div>
+    <div class="control-row">
+      <label>Channel Offset Y:</label>
+      <input type="range" id="channelOffsetY" min="-5" max="5" step="0.1" value="0.5">
+      <span id="channelOffsetYValue" class="value-display">0.5</span>
+    </div>
+    <div class="control-row">
+      <label>Mix Amount:</label>
+      <input type="range" id="channelMixAmount" min="0" max="1" step="0.01" value="0.5">
+      <span id="channelMixAmountValue" class="value-display">0.5</span>
+    </div>
+  </div>
+
+  <!-- Pixelation Controls -->
+  <div class="mode-controls" id="pixelationControls">
+    <div class="control-row">
+      <label>Pixel Size:</label>
+      <input type="range" id="pixelationSize" min="8" max="64" step="2" value="16">
+      <span id="pixelationSizeValue" class="value-display">16</span>
+    </div>
+    <div class="control-row">
+      <label>Pattern Type:</label>
+      <input type="range" id="pixelPattern" min="0" max="0.99" step="0.25" value="0">
+      <span id="pixelPatternValue" class="value-display">Square</span>
+    </div>
+  </div>
+
+  <!-- Displacement Controls -->
+  <div class="mode-controls" id="displacementControls">
+    <div class="control-row">
+      <label>Displacement:</label>
+      <input type="range" id="displacementStrength" min="0" max="10" step="0.1" value="2.0">
+      <span id="displacementStrengthValue" class="value-display">2.0</span>
+    </div>
+  </div>
+
+  <!-- Strip Controls -->
+  <div class="mode-controls" id="stripControls">
+    <div class="control-row">
+      <label>Strip Orientation:</label>
+      <input type="range" id="stripOrientation" min="0" max="6.28" step="0.1" value="0">
+      <span id="stripOrientationValue" class="value-display">0.0</span>
+    </div>
+    <div class="control-row">
+      <label>Blend Mode:</label>
+      <input type="range" id="stripBlendMode" min="0" max="0.99" step="0.33" value="0">
+      <span id="stripBlendModeValue" class="value-display">Normal</span>
+    </div>
+    <div class="control-row">
+      <label>Distortion:</label>
+      <input type="range" id="stripDistortion" min="0" max="1" step="0.01" value="0.1">
+      <span id="stripDistortionValue" class="value-display">0.10</span>
+    </div>
+  </div>
+
+  <!-- Quantum Controls -->
+  <div class="mode-controls" id="quantumControls">
+    <div class="control-row">
+      <label>Quantum Levels:</label>
+      <input type="range" id="quantumLevels" min="8" max="64" step="2" value="16">
+      <span id="quantumLevelsValue" class="value-display">16</span>
+    </div>
+    <div class="control-row">
+      <label>Quantum Curve:</label>
+      <input type="range" id="quantumCurve" min="0.5" max="2.0" step="0.1" value="1.0">
+      <span id="quantumCurveValue" class="value-display">1.0</span>
+    </div>
+    <div class="control-row">
+      <label>Dithering:</label>
+      <input type="range" id="dithering" min="0" max="0.5" step="0.01" value="0.1">
+      <span id="ditheringValue" class="value-display">0.10</span>
+    </div>
+  </div>
+
+  <!-- Motion Controls -->
+  <div class="section-header">Motion Controls</div>
+  
+  <div class="control-row">
+    <label>Scroll Speed X:</label>
+    <input type="range" id="scrollSpeedX" min="-5" max="5" step="0.1" value="0.5">
+    <span id="scrollSpeedXValue" class="value-display">0.5</span>
+  </div>
+
+  <div class="control-row">
+    <label>Scroll Speed Y:</label>
+    <input type="range" id="scrollSpeedY" min="-5" max="5" step="0.1" value="0.3">
+    <span id="scrollSpeedYValue" class="value-display">0.3</span>
+  </div>
+
+  <div class="control-row">
+    <label>Switch Interval:</label>
+    <input type="range" id="imageSwitchInterval" min="0.1" max="5" step="0.1" value="1.0">
+    <span id="imageSwitchIntervalValue" class="value-display">1.0</span>
+  </div>
+
+  <!-- Performance Controls -->
+  <div class="section-header">Performance</div>
+  
+  <div class="control-row">
+    <label>Tile Factor:</label>
+    <input type="range" id="tileFactor" min="1" max="10" step="1" value="4">
+    <span id="tileFactorValue" class="value-display">4</span>
+  </div>
+
+  <div class="control-row">
+    <label>Fade Factor:</label>
+    <input type="range" id="fadeFactor" min="0" max="1" step="0.01" value="0.85">
+    <span id="fadeFactorValue" class="value-display">0.85</span>
+  </div>
+
+  <!-- Reset Button -->
+  <div style="text-align: center; margin-top: 10px;">
+    <button id="resetButton">RESET TO DEFAULTS</button>
+  </div>
+</div>
+
+<!-- Data Display Panel -->
+<div id="dataDisplay">
+  <div class="control-header">REAL-TIME ANALYSIS</div>
+  
+  <div class="data-row">
+    <span class="data-label">LUMINANCE:</span>
+    <span id="luminanceValue" class="data-value">0.000</span>
+  </div>
+  
+  <div class="data-row">
+    <span class="data-label">ENTROPY:</span>
+    <span id="entropyValue" class="data-value">0.000</span>
+  </div>
+  
+  <div class="data-row">
+    <span class="data-label">VARIANCE:</span>
+    <span id="varianceValue" class="data-value">0.000</span>
+  </div>
+  
+  <div class="data-row">
+    <span class="data-label">EDGE DENSITY:</span>
+    <span id="edgeDensityValue" class="data-value">0.000</span>
+  </div>
+  
+  <div class="data-row">
+    <span class="data-label">IMAGES:</span>
+    <span id="imageCounter" class="data-value">0</span>
+  </div>
+  
+  <div class="data-row">
+    <span class="data-label">FPS:</span>
+    <span id="fpsCounter" class="data-value">0</span>
+  </div>
+  
+  <div class="data-row">
+    <span class="data-label">BUFFER:</span>
+    <span id="bufferUsage" class="data-value">0%</span>
+  </div>
+</div>
+
+<!-- Keyboard Shortcuts -->
+<div id="shortcuts">
+  <div class="control-header">KEYBOARD SHORTCUTS</div>
+  
+  <div class="shortcut-row">
+    <span>1-8:</span>
+    <span>Mode Selection</span>
+  </div>
+  
+  <div class="shortcut-row">
+    <span>G:</span>
+    <span>Grid Mode</span>
+  </div>
+  
+  <div class="shortcut-row">
+    <span>E:</span>
+    <span>Edge Detection</span>
+  </div>
+  
+  <div class="shortcut-row">
+    <span>B:</span>
+    <span>Binary Mode</span>
+  </div>
+  
+  <div class="shortcut-row">
+    <span>C:</span>
+    <span>Channel Mode</span>
+  </div>
+  
+  <div class="shortcut-row">
+    <span>P:</span>
+    <span>Pixelation Mode</span>
+  </div>
+  
+  <div class="shortcut-row">
+    <span>D:</span>
+    <span>Displacement Mode</span>
+  </div>
+  
+  <div class="shortcut-row">
+    <span>S:</span>
+    <span>Strip Mode</span>
+  </div>
+  
+  <div class="shortcut-row">
+    <span>Q:</span>
+    <span>Quantum Mode</span>
+  </div>
+  
+  <div class="shortcut-row">
+    <span>T:</span>
+    <span>Cycle Threshold</span>
+  </div>
+  
+  <div class="shortcut-row">
+    <span>R:</span>
+    <span>Reset Defaults</span>
+  </div>
+  
+  <div class="shortcut-row">
+    <span>ESC:</span>
+    <span>Toggle Controls</span>
+  </div>
+</div>
+
+<!-- Status Bar -->
+<div id="statusBar">
+  <span>STATUS: <span id="connectionStatus">CONNECTING...</span></span>
+  <span style="margin-left: 20px;">MODE: <span id="currentMode">EDGES</span></span>
+  <span style="margin-left: 20px;">PROCESSING: <span id="processingMode">BLACK/WHITE</span></span>
+</div>
+
+<!-- Mode Change Indicator -->
+<div id="modeIndicator"></div>
+
+<!-- Canvas -->
+<canvas id="canvas"></canvas>
+
+<script src="index.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html> 
+</html> 

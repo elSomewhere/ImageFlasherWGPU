@@ -130,6 +130,19 @@ index/fast:
 .PHONY : index/fast
 
 #=============================================================================
+# Target rules for targets named copy_assets
+
+# Build rule for target.
+copy_assets: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 copy_assets
+.PHONY : copy_assets
+
+# fast build rule for target.
+copy_assets/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/copy_assets.dir/build.make CMakeFiles/copy_assets.dir/build
+.PHONY : copy_assets/fast
+
+#=============================================================================
 # Target rules for targets named serve
 
 # Build rule for target.
@@ -142,29 +155,29 @@ serve/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/serve.dir/build.make CMakeFiles/serve.dir/build
 .PHONY : serve/fast
 
-main.o: main.cpp.o
-.PHONY : main.o
+src/cpp/main.o: src/cpp/main.cpp.o
+.PHONY : src/cpp/main.o
 
 # target to build an object file
-main.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/index.dir/build.make CMakeFiles/index.dir/main.cpp.o
-.PHONY : main.cpp.o
+src/cpp/main.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/index.dir/build.make CMakeFiles/index.dir/src/cpp/main.cpp.o
+.PHONY : src/cpp/main.cpp.o
 
-main.i: main.cpp.i
-.PHONY : main.i
+src/cpp/main.i: src/cpp/main.cpp.i
+.PHONY : src/cpp/main.i
 
 # target to preprocess a source file
-main.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/index.dir/build.make CMakeFiles/index.dir/main.cpp.i
-.PHONY : main.cpp.i
+src/cpp/main.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/index.dir/build.make CMakeFiles/index.dir/src/cpp/main.cpp.i
+.PHONY : src/cpp/main.cpp.i
 
-main.s: main.cpp.s
-.PHONY : main.s
+src/cpp/main.s: src/cpp/main.cpp.s
+.PHONY : src/cpp/main.s
 
 # target to generate assembly for a file
-main.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/index.dir/build.make CMakeFiles/index.dir/main.cpp.s
-.PHONY : main.cpp.s
+src/cpp/main.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/index.dir/build.make CMakeFiles/index.dir/src/cpp/main.cpp.s
+.PHONY : src/cpp/main.cpp.s
 
 # Help Target
 help:
@@ -174,11 +187,12 @@ help:
 	@echo "... depend"
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
+	@echo "... copy_assets"
 	@echo "... serve"
 	@echo "... index"
-	@echo "... main.o"
-	@echo "... main.i"
-	@echo "... main.s"
+	@echo "... src/cpp/main.o"
+	@echo "... src/cpp/main.i"
+	@echo "... src/cpp/main.s"
 .PHONY : help
 
 

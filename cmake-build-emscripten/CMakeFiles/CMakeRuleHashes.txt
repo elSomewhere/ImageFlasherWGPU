@@ -1,2 +1,3 @@
 # Hashes of file build rules.
-f473b508ec706bea4f4ef73ce0722400 CMakeFiles/serve
+22eec230edbe6dff44f4361f72111497 CMakeFiles/copy_assets
+cd8c2503fc56d0be2409f6058f6647a5 CMakeFiles/serve

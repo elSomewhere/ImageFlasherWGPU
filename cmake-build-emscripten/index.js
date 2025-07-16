@@ -7129,7 +7129,17 @@ var _setScrollingSpeed = Module["_setScrollingSpeed"] = createExportWrapper("set
 
 var _setScrollingOffset = Module["_setScrollingOffset"] = createExportWrapper("setScrollingOffset", 2);
 
-var _setIkedaMode = Module["_setIkedaMode"] = createExportWrapper("setIkedaMode", 1);
+var _setScrollSpeedX = Module["_setScrollSpeedX"] = createExportWrapper("setScrollSpeedX", 1);
+
+var _setScrollSpeedY = Module["_setScrollSpeedY"] = createExportWrapper("setScrollSpeedY", 1);
+
+var _setScrollOffsetX = Module["_setScrollOffsetX"] = createExportWrapper("setScrollOffsetX", 1);
+
+var _setScrollOffsetY = Module["_setScrollOffsetY"] = createExportWrapper("setScrollOffsetY", 1);
+
+var _setPreprocessingMode = Module["_setPreprocessingMode"] = createExportWrapper("setPreprocessingMode", 1);
+
+var _setPostprocessingMode = Module["_setPostprocessingMode"] = createExportWrapper("setPostprocessingMode", 1);
 
 var _setIkedaThreshold = Module["_setIkedaThreshold"] = createExportWrapper("setIkedaThreshold", 1);
 
@@ -7137,21 +7147,37 @@ var _setIkedaGridSize = Module["_setIkedaGridSize"] = createExportWrapper("setIk
 
 var _setIkedaDataIntensity = Module["_setIkedaDataIntensity"] = createExportWrapper("setIkedaDataIntensity", 1);
 
-var _setIkedaFrequency = Module["_setIkedaFrequency"] = createExportWrapper("setIkedaFrequency", 1);
+var _setContrastBoost = Module["_setContrastBoost"] = createExportWrapper("setContrastBoost", 1);
 
-var _setIkedaPhaseShift = Module["_setIkedaPhaseShift"] = createExportWrapper("setIkedaPhaseShift", 1);
+var _setAdaptiveRadius = Module["_setAdaptiveRadius"] = createExportWrapper("setAdaptiveRadius", 1);
 
-var _setIkedaNoiseLevel = Module["_setIkedaNoiseLevel"] = createExportWrapper("setIkedaNoiseLevel", 1);
+var _setThresholdSmoothing = Module["_setThresholdSmoothing"] = createExportWrapper("setThresholdSmoothing", 1);
 
-var _setIkedaStripWidth = Module["_setIkedaStripWidth"] = createExportWrapper("setIkedaStripWidth", 1);
+var _setGridRotation = Module["_setGridRotation"] = createExportWrapper("setGridRotation", 1);
 
-var _setIkedaQuantumLevels = Module["_setIkedaQuantumLevels"] = createExportWrapper("setIkedaQuantumLevels", 1);
+var _setGridAspect = Module["_setGridAspect"] = createExportWrapper("setGridAspect", 1);
 
-var _setIkedaScanSpeed = Module["_setIkedaScanSpeed"] = createExportWrapper("setIkedaScanSpeed", 1);
+var _setEdgeSensitivity = Module["_setEdgeSensitivity"] = createExportWrapper("setEdgeSensitivity", 1);
 
-var _setIkedaMatrixScale = Module["_setIkedaMatrixScale"] = createExportWrapper("setIkedaMatrixScale", 1);
+var _setChannelOffsetX = Module["_setChannelOffsetX"] = createExportWrapper("setChannelOffsetX", 1);
 
-var _setIkedaPulseRate = Module["_setIkedaPulseRate"] = createExportWrapper("setIkedaPulseRate", 1);
+var _setChannelOffsetY = Module["_setChannelOffsetY"] = createExportWrapper("setChannelOffsetY", 1);
+
+var _setChannelMixAmount = Module["_setChannelMixAmount"] = createExportWrapper("setChannelMixAmount", 1);
+
+var _setPixelPattern = Module["_setPixelPattern"] = createExportWrapper("setPixelPattern", 1);
+
+var _setDisplacementStrength = Module["_setDisplacementStrength"] = createExportWrapper("setDisplacementStrength", 1);
+
+var _setStripOrientation = Module["_setStripOrientation"] = createExportWrapper("setStripOrientation", 1);
+
+var _setStripBlendMode = Module["_setStripBlendMode"] = createExportWrapper("setStripBlendMode", 1);
+
+var _setStripDistortion = Module["_setStripDistortion"] = createExportWrapper("setStripDistortion", 1);
+
+var _setQuantumCurve = Module["_setQuantumCurve"] = createExportWrapper("setQuantumCurve", 1);
+
+var _setDithering = Module["_setDithering"] = createExportWrapper("setDithering", 1);
 
 var _getImageAverageLuminance = Module["_getImageAverageLuminance"] = createExportWrapper("getImageAverageLuminance", 0);
 

@@ -66,8 +66,9 @@ include CMakeFiles/serve.dir/compiler_depend.make
 # Include the progress variables for this target.
 include CMakeFiles/serve.dir/progress.make
 
-CMakeFiles/serve: index.js
-	python3 -m http.server -d /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/cmake-build-emscripten
+CMakeFiles/serve:
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --blue --bold --progress-dir=/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/cmake-build-emscripten/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Starting Node.js server"
+	cd /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU && node server.js --ikeda
 
 serve: CMakeFiles/serve
 serve: CMakeFiles/serve.dir/build.make

@@ -69,29 +69,29 @@ include CMakeFiles/index.dir/progress.make
 # Include the compile flags for this target's objects.
 include CMakeFiles/index.dir/flags.make
 
-CMakeFiles/index.dir/main.cpp.o: CMakeFiles/index.dir/flags.make
-CMakeFiles/index.dir/main.cpp.o: CMakeFiles/index.dir/includes_CXX.rsp
-CMakeFiles/index.dir/main.cpp.o: /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/main.cpp
-CMakeFiles/index.dir/main.cpp.o: CMakeFiles/index.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/cmake-build-emscripten/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/index.dir/main.cpp.o"
-	em++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/index.dir/main.cpp.o -MF CMakeFiles/index.dir/main.cpp.o.d -o CMakeFiles/index.dir/main.cpp.o -c /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/main.cpp
+CMakeFiles/index.dir/src/cpp/main.cpp.o: CMakeFiles/index.dir/flags.make
+CMakeFiles/index.dir/src/cpp/main.cpp.o: CMakeFiles/index.dir/includes_CXX.rsp
+CMakeFiles/index.dir/src/cpp/main.cpp.o: /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/src/cpp/main.cpp
+CMakeFiles/index.dir/src/cpp/main.cpp.o: CMakeFiles/index.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/cmake-build-emscripten/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/index.dir/src/cpp/main.cpp.o"
+	em++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/index.dir/src/cpp/main.cpp.o -MF CMakeFiles/index.dir/src/cpp/main.cpp.o.d -o CMakeFiles/index.dir/src/cpp/main.cpp.o -c /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/src/cpp/main.cpp
 
-CMakeFiles/index.dir/main.cpp.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/index.dir/main.cpp.i"
-	em++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/main.cpp > CMakeFiles/index.dir/main.cpp.i
+CMakeFiles/index.dir/src/cpp/main.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing CXX source to CMakeFiles/index.dir/src/cpp/main.cpp.i"
+	em++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/src/cpp/main.cpp > CMakeFiles/index.dir/src/cpp/main.cpp.i
 
-CMakeFiles/index.dir/main.cpp.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/index.dir/main.cpp.s"
-	em++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/main.cpp -o CMakeFiles/index.dir/main.cpp.s
+CMakeFiles/index.dir/src/cpp/main.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling CXX source to assembly CMakeFiles/index.dir/src/cpp/main.cpp.s"
+	em++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/src/cpp/main.cpp -o CMakeFiles/index.dir/src/cpp/main.cpp.s
 
 # Object files for target index
 index_OBJECTS = \
-"CMakeFiles/index.dir/main.cpp.o"
+"CMakeFiles/index.dir/src/cpp/main.cpp.o"
 
 # External object files for target index
 index_EXTERNAL_OBJECTS =
 
-index.js: CMakeFiles/index.dir/main.cpp.o
+index.js: CMakeFiles/index.dir/src/cpp/main.cpp.o
 index.js: CMakeFiles/index.dir/build.make
 index.js: CMakeFiles/index.dir/objects1.rsp
 index.js: CMakeFiles/index.dir/link.txt

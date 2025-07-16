@@ -12,6 +12,8 @@ set(CMAKE_MAKEFILE_DEPENDS
   "CMakeFiles/3.26.3/CMakeCCompiler.cmake"
   "CMakeFiles/3.26.3/CMakeCXXCompiler.cmake"
   "CMakeFiles/3.26.3/CMakeSystem.cmake"
+  "/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/public/app.js"
+  "/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/public/index.html"
   "/opt/homebrew/Cellar/cmake/3.26.3/share/cmake/Modules/CMakeCInformation.cmake"
   "/opt/homebrew/Cellar/cmake/3.26.3/share/cmake/Modules/CMakeCXXInformation.cmake"
   "/opt/homebrew/Cellar/cmake/3.26.3/share/cmake/Modules/CMakeCommonLanguageInclude.cmake"
@@ -35,10 +37,14 @@ set(CMAKE_MAKEFILE_OUTPUTS
 
 # Byproducts of CMake generate step:
 set(CMAKE_MAKEFILE_PRODUCTS
+  "public/index.html"
+  "public/app.js"
   "CMakeFiles/CMakeDirectoryInformation.cmake"
   )
 
 # Dependency information for all targets:
 set(CMAKE_DEPEND_INFO_FILES
   "CMakeFiles/index.dir/DependInfo.cmake"
+  "CMakeFiles/copy_assets.dir/DependInfo.cmake"
+  "CMakeFiles/serve.dir/DependInfo.cmake"
   )

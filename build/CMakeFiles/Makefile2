@@ -64,6 +64,7 @@ CMAKE_BINARY_DIR = /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/build
 
 # The main recursive "all" target.
 all: CMakeFiles/index.dir/all
+all: CMakeFiles/copy_assets.dir/all
 .PHONY : all
 
 # The main recursive "preinstall" target.
@@ -72,6 +73,8 @@ preinstall:
 
 # The main recursive "clean" target.
 clean: CMakeFiles/index.dir/clean
+clean: CMakeFiles/copy_assets.dir/clean
+clean: CMakeFiles/serve.dir/clean
 .PHONY : clean
 
 #=============================================================================
@@ -81,7 +84,7 @@ clean: CMakeFiles/index.dir/clean
 CMakeFiles/index.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/index.dir/build.make CMakeFiles/index.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/index.dir/build.make CMakeFiles/index.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/build/CMakeFiles --progress-num=1,2 "Built target index"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/build/CMakeFiles --progress-num=2,3 "Built target index"
 .PHONY : CMakeFiles/index.dir/all
 
 # Build rule for subdir invocation for target.
@@ -99,6 +102,58 @@ index: CMakeFiles/index.dir/rule
 CMakeFiles/index.dir/clean:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/index.dir/build.make CMakeFiles/index.dir/clean
 .PHONY : CMakeFiles/index.dir/clean
+
+#=============================================================================
+# Target rules for target CMakeFiles/copy_assets.dir
+
+# All Build rule for target.
+CMakeFiles/copy_assets.dir/all: CMakeFiles/index.dir/all
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/copy_assets.dir/build.make CMakeFiles/copy_assets.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/copy_assets.dir/build.make CMakeFiles/copy_assets.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/build/CMakeFiles --progress-num=1 "Built target copy_assets"
+.PHONY : CMakeFiles/copy_assets.dir/all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/copy_assets.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/build/CMakeFiles 3
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/copy_assets.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/build/CMakeFiles 0
+.PHONY : CMakeFiles/copy_assets.dir/rule
+
+# Convenience name for target.
+copy_assets: CMakeFiles/copy_assets.dir/rule
+.PHONY : copy_assets
+
+# clean rule for target.
+CMakeFiles/copy_assets.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/copy_assets.dir/build.make CMakeFiles/copy_assets.dir/clean
+.PHONY : CMakeFiles/copy_assets.dir/clean
+
+#=============================================================================
+# Target rules for target CMakeFiles/serve.dir
+
+# All Build rule for target.
+CMakeFiles/serve.dir/all: CMakeFiles/copy_assets.dir/all
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/serve.dir/build.make CMakeFiles/serve.dir/depend
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/serve.dir/build.make CMakeFiles/serve.dir/build
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/build/CMakeFiles --progress-num=4 "Built target serve"
+.PHONY : CMakeFiles/serve.dir/all
+
+# Build rule for subdir invocation for target.
+CMakeFiles/serve.dir/rule: cmake_check_build_system
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/build/CMakeFiles 4
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/serve.dir/all
+	$(CMAKE_COMMAND) -E cmake_progress_start /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/build/CMakeFiles 0
+.PHONY : CMakeFiles/serve.dir/rule
+
+# Convenience name for target.
+serve: CMakeFiles/serve.dir/rule
+.PHONY : serve
+
+# clean rule for target.
+CMakeFiles/serve.dir/clean:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/serve.dir/build.make CMakeFiles/serve.dir/clean
+.PHONY : CMakeFiles/serve.dir/clean
 
 #=============================================================================
 # Special targets to cleanup operation of make.

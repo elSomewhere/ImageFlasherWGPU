@@ -8,7 +8,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
-  "/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/main.cpp" "CMakeFiles/index.dir/main.cpp.o" "gcc" "CMakeFiles/index.dir/main.cpp.o.d"
+  "/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/src/cpp/main.cpp" "CMakeFiles/index.dir/src/cpp/main.cpp.o" "gcc" "CMakeFiles/index.dir/src/cpp/main.cpp.o.d"
   )
 
 # Targets to which this target links which contain Fortran sources.

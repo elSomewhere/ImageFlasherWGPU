@@ -172,10 +172,14 @@ static float g_offsetY = 0.0f;
 static float g_speedX  = 0.1f;
 static float g_speedY  = 0.0f;
 
-// ========== Ikeda parameters ==========
+// ========== Restructured Ikeda parameters ==========
 
-static int g_ikedaMode = 1;           // 0=normal, 1=blackwhite, 2=grid, 3=data, 4=binary, 5-12=extended modes
-static float g_ikedaThreshold = 0.5f; // black/white threshold
+// Preprocessing parameters
+static int g_preprocessingMode = 1;    // 0=color, 1=black/white
+static float g_ikedaThreshold = 0.5f;  // black/white threshold for preprocessing
+
+// Postprocessing parameters
+static int g_postprocessingMode = 1;   // 0=grid, 1=data, 2=binary, 3=frequency, 4=scan, 5=matrix, 6=pulse, 7=noise, 8=strip, 9=phase, 10=quantum
 static float g_ikedaGridSize = 32.0f; // grid quantization size
 static float g_ikedaDataIntensity = 0.5f; // data overlay intensity
 static float g_globalTime = 0.0f;     // global time for animations
@@ -957,7 +961,8 @@ void updateIkedaUniforms() {
     if (!ikedaUniformBuffer) return;
     
     struct IkedaModeParams {
-        int32_t mode;
+        int32_t preprocessingMode;
+        int32_t postprocessingMode;
         float threshold;
         float gridSize;
         float dataIntensity;
@@ -975,10 +980,11 @@ void updateIkedaUniforms() {
         float matrixScale;
         float pulseRate;
         // No explicit padding - GPU handles 16-byte alignment automatically
-        // Struct: 60 bytes, Buffer: 64 bytes (GPU-aligned)
+        // Struct: 64 bytes, Buffer: 64 bytes (GPU-aligned)
     } ikedaData;
     
-    ikedaData.mode = g_ikedaMode;
+    ikedaData.preprocessingMode = g_preprocessingMode;
+    ikedaData.postprocessingMode = g_postprocessingMode;
     ikedaData.threshold = g_ikedaThreshold;
     ikedaData.gridSize = g_ikedaGridSize;
     ikedaData.dataIntensity = g_ikedaDataIntensity;
@@ -1059,13 +1065,20 @@ void setScrollingOffset(float ox, float oy) {
     std::cout << "[INFO] setScrollingOffset(" << ox << ", " << oy << ")\n";
 }
 
-// ========== Ikeda Mode Functions ==========
+// ========== Restructured Pipeline Functions ==========
 
 EMSCRIPTEN_KEEPALIVE
-void setIkedaMode(int mode) {
-    g_ikedaMode = mode;
+void setPreprocessingMode(int mode) {
+    g_preprocessingMode = mode;
     updateIkedaUniforms();
-    std::cout << "[INFO] setIkedaMode(" << mode << ")\n";
+    std::cout << "[INFO] setPreprocessingMode(" << mode << ")\n";
+}
+
+EMSCRIPTEN_KEEPALIVE
+void setPostprocessingMode(int mode) {
+    g_postprocessingMode = mode;
+    updateIkedaUniforms();
+    std::cout << "[INFO] setPostprocessingMode(" << mode << ")\n";
 }
 
 EMSCRIPTEN_KEEPALIVE

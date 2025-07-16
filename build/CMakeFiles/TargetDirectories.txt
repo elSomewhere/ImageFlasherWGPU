@@ -1,3 +1,5 @@
 /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/build/CMakeFiles/index.dir
+/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/build/CMakeFiles/copy_assets.dir
+/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/build/CMakeFiles/serve.dir
 /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/build/CMakeFiles/edit_cache.dir
 /Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/build/CMakeFiles/rebuild_cache.dir

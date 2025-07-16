@@ -7129,7 +7129,9 @@ var _setScrollingSpeed = Module["_setScrollingSpeed"] = createExportWrapper("set
 
 var _setScrollingOffset = Module["_setScrollingOffset"] = createExportWrapper("setScrollingOffset", 2);
 
-var _setIkedaMode = Module["_setIkedaMode"] = createExportWrapper("setIkedaMode", 1);
+var _setPreprocessingMode = Module["_setPreprocessingMode"] = createExportWrapper("setPreprocessingMode", 1);
+
+var _setPostprocessingMode = Module["_setPostprocessingMode"] = createExportWrapper("setPostprocessingMode", 1);
 
 var _setIkedaThreshold = Module["_setIkedaThreshold"] = createExportWrapper("setIkedaThreshold", 1);
 

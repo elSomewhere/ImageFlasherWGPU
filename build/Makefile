@@ -129,6 +129,32 @@ index/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/index.dir/build.make CMakeFiles/index.dir/build
 .PHONY : index/fast
 
+#=============================================================================
+# Target rules for targets named copy_assets
+
+# Build rule for target.
+copy_assets: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 copy_assets
+.PHONY : copy_assets
+
+# fast build rule for target.
+copy_assets/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/copy_assets.dir/build.make CMakeFiles/copy_assets.dir/build
+.PHONY : copy_assets/fast
+
+#=============================================================================
+# Target rules for targets named serve
+
+# Build rule for target.
+serve: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 serve
+.PHONY : serve
+
+# fast build rule for target.
+serve/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/serve.dir/build.make CMakeFiles/serve.dir/build
+.PHONY : serve/fast
+
 src/cpp/main.o: src/cpp/main.cpp.o
 .PHONY : src/cpp/main.o
 
@@ -161,6 +187,8 @@ help:
 	@echo "... depend"
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
+	@echo "... copy_assets"
+	@echo "... serve"
 	@echo "... index"
 	@echo "... src/cpp/main.o"
 	@echo "... src/cpp/main.i"
