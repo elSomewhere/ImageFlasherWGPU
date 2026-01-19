@@ -12,13 +12,16 @@ YELLOW = \033[1;33m
 RED = \033[0;31m
 NC = \033[0m # No Color
 
-.PHONY: help stop build start rebuild clean status ikeda start-ikeda rebuild-ikeda reddit start-reddit rebuild-reddit
+.PHONY: help stop build start rebuild clean status ikeda start-ikeda rebuild-ikeda reddit start-reddit rebuild-reddit venv pip-install setup-python
 
 # Default target
 help:
 	@echo "$(GREEN)ImageFlasherWGPU Makefile$(NC)"
 	@echo "================================"
 	@echo "Available targets:"
+	@echo "  $(YELLOW)setup-python$(NC)   - Create .venv and install Python deps"
+	@echo "  $(YELLOW)venv$(NC)           - Create project-local Python virtualenv (.venv)"
+	@echo "  $(YELLOW)pip-install$(NC)    - Install Python deps into .venv"
 	@echo "  $(YELLOW)rebuild$(NC)        - Stop servers, rebuild project, and restart (recommended)"
 	@echo "  $(YELLOW)rebuild-ikeda$(NC)   - Rebuild and start Ikeda version"
 	@echo "  $(YELLOW)rebuild-reddit$(NC)  - Rebuild and start Reddit crawler version"
@@ -35,6 +38,30 @@ help:
 	@echo "  $(YELLOW)Regular$(NC):     Visual effects and generated image streaming"
 	@echo "  $(YELLOW)Ikeda$(NC):       Minimalist data aesthetics (Ryoji Ikeda inspired)"
 	@echo "  $(YELLOW)Reddit$(NC):      Live Reddit image streaming with visual effects"
+
+# Python virtual environment setup
+venv:
+	@echo "$(YELLOW)🐍 Creating Python virtual environment (.venv)...$(NC)"
+	@if [ ! -d .venv ]; then \
+	if command -v python3.11 >/dev/null 2>&1; then PY=python3.11; \
+	elif command -v python3.12 >/dev/null 2>&1; then PY=python3.12; \
+	elif command -v /opt/homebrew/bin/python3 >/dev/null 2>&1; then PY=/opt/homebrew/bin/python3; \
+	elif command -v /usr/bin/python3 >/dev/null 2>&1; then PY=/usr/bin/python3; \
+	else PY=python3; fi; \
+	echo "Using $$PY"; \
+	"$$PY" -m venv .venv; \
+	echo "$(GREEN)✅ .venv created$(NC)"; \
+	else echo "$(GREEN)✅ .venv already exists$(NC)"; fi
+
+pip-install: venv
+	@echo "$(YELLOW)📦 Installing Python dependencies into .venv...$(NC)"
+	@. ./.venv/bin/activate; \
+		python -m pip install -U pip setuptools wheel && \
+		pip install -r requirements.txt
+	@echo "$(GREEN)✅ Python dependencies installed$(NC)"
+
+setup-python: pip-install
+	@echo "$(GREEN)✅ Python environment ready$(NC)"
 
 # Full rebuild cycle (recommended target)
 rebuild: stop build start
@@ -72,7 +99,7 @@ build:
 	@echo "$(GREEN)✅ Build completed successfully!$(NC)"
 
 # Start the regular application
-start:
+start: setup-python
 	@echo "$(YELLOW)🚀 Starting ImageFlasherWGPU (Regular Version)...$(NC)"
 	@echo "$(YELLOW)🌐 Ikeda interface: http://localhost:$(WEB_PORT)$(NC)"
 	@echo "$(YELLOW)📡 WebSocket server will run on port: $(WEBSOCKET_PORT)$(NC)"
@@ -81,7 +108,7 @@ start:
 	@node server.js --generated
 
 # Start the Ikeda version (enhanced data aesthetics)
-start-ikeda:
+start-ikeda: setup-python
 	@echo "$(YELLOW)🚀 Starting ImageFlasherWGPU (Ikeda Version)...$(NC)"
 	@echo "$(YELLOW)🎨 Ikeda interface: http://localhost:$(WEB_PORT)$(NC)"
 	@echo "$(YELLOW)📡 WebSocket server will run on port: $(WEBSOCKET_PORT)$(NC)"
@@ -91,7 +118,7 @@ start-ikeda:
 	@node server.js --ikeda
 
 # Start the Reddit crawler version
-start-reddit:
+start-reddit: setup-python
 	@echo "$(YELLOW)🚀 Starting ImageFlasherWGPU (Reddit Crawler Version)...$(NC)"
 	@echo "$(YELLOW)🌐 Ikeda interface: http://localhost:$(WEB_PORT)$(NC)"
 	@echo "$(YELLOW)📡 WebSocket server will run on port: $(WEBSOCKET_PORT)$(NC)"
@@ -101,7 +128,7 @@ start-reddit:
 	@node server.js --reddit
 
 # Start Reddit crawler with specific subreddit
-start-reddit-subreddit:
+start-reddit-subreddit: setup-python
 	@if [ -z "$(SUBREDDIT)" ]; then \
 		echo "$(RED)❌ Error: SUBREDDIT variable not set$(NC)"; \
 		echo "$(YELLOW)Usage: make start-reddit-subreddit SUBREDDIT=cats$(NC)"; \

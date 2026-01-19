@@ -109,6 +109,10 @@ class ImageFlasherServer {
         return new Promise((resolve, reject) => {
             let scriptPath;
             let args = [];
+            // Resolve Python interpreter: prefer project's .venv if available
+            const projectRoot = __dirname;
+            const venvPython = path.join(projectRoot, '.venv', 'bin', 'python');
+            const pythonCmd = fs.existsSync(venvPython) ? venvPython : 'python3';
 
             // Determine which Python script to run
             switch (mode) {
@@ -134,7 +138,7 @@ class ImageFlasherServer {
             }
 
             // Start Python process
-            this.pythonProcess = spawn('python3', [scriptPath, ...args], {
+            this.pythonProcess = spawn(pythonCmd, [scriptPath, ...args], {
                 stdio: ['pipe', 'pipe', 'pipe'],
                 cwd: __dirname
             });
