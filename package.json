@@ -201,7 +201,7 @@
     "clean": "rm -rf build/ && rm -f public/index.js public/index.wasm",
     "stop": "pkill -f 'node server.js' || true",
     "rebuild": "npm run stop && npm run clean && npm run build && npm run start",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests"
   },
   "repository": {
     "type": "git",

@@ -1,8 +1,6 @@
-#!/Users/estebanlanter/Documents/JOB2023/ImageFlasherWGPU/.venv/bin/python
-# -*- coding: utf-8 -*-
-import re
+#!/Users/estebanlanter/Coding/ImageFlasherWGPU/.venv/bin/python
 import sys
-from wheel.cli import main
+from wheel._commands import main
 if __name__ == '__main__':
-    sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
+    sys.argv[0] = sys.argv[0].removesuffix('.exe')
     sys.exit(main())

@@ -74,6 +74,48 @@
       appearance: none;
     }
 
+    .crawler-input {
+      width: 165px;
+      background: #000000;
+      color: #FFFFFF;
+      border: 1px solid #FFFFFF;
+      font-size: 9px;
+      font-family: inherit;
+      padding: 3px;
+    }
+
+    .crawler-status {
+      color: #999999;
+      font-size: 8px;
+      line-height: 1.3;
+      margin-top: 4px;
+      min-height: 28px;
+      word-break: break-word;
+    }
+
+    .crawler-log {
+      margin-top: 6px;
+      max-height: 110px;
+      overflow-y: auto;
+      border: 1px solid #333333;
+      padding: 4px;
+      background: #000000;
+      color: #BBBBBB;
+      font-size: 8px;
+      line-height: 1.3;
+      word-break: break-word;
+    }
+
+    .crawler-log-entry {
+      margin-bottom: 3px;
+      border-bottom: 1px solid #111111;
+      padding-bottom: 2px;
+    }
+
+    .crawler-log-entry strong {
+      color: #FFFFFF;
+    }
+
     .control-row input[type="range"]::-webkit-slider-thumb {
       -webkit-appearance: none;
       appearance: none;
@@ -476,6 +518,23 @@
     <span id="tileValue" class="value-display">3</span>
   </div>
 
+  <!-- Web Crawler Controls -->
+  <div class="section-header">Crawler Steering</div>
+  <div class="control-row">
+    <label>Keywords:</label>
+    <input class="crawler-input" id="crawlerKeywords" type="text" placeholder="architecture, cats">
+  </div>
+  <div class="control-row">
+    <label>Seed URL:</label>
+    <input class="crawler-input" id="crawlerSeed" type="url" placeholder="https://example.com">
+  </div>
+  <div style="text-align: center;">
+    <button id="applyCrawlerKeywords">Set Keywords</button>
+    <button id="addCrawlerSeed">Add Seed</button>
+  </div>
+  <div id="crawlerStatus" class="crawler-status">Crawler: inactive</div>
+  <div id="crawlerLog" class="crawler-log">Crawler log: waiting for state...</div>
+
   <!-- System Controls -->
   <div class="section-header">System</div>
   <div class="control-row">
@@ -566,6 +625,7 @@
   <span style="margin-left: 20px;">Pre: <span id="currentPreprocessing">BLACK/WHITE</span></span>
   <span style="margin-left: 15px;">Post: <span id="currentPostprocessing">DATA</span></span>
   <span style="margin-left: 15px;"><span id="bufferUsageLabel">Buffer: --</span></span>
+  <span style="margin-left: 15px;">Crawler: <span id="crawlerStatusLabel">--</span></span>
 </div>
 
 <!-- Keyboard Shortcuts -->

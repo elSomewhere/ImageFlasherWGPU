@@ -12,19 +12,27 @@ const express = require('express');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
+const WebSocket = require('ws');
 
 // Configuration
 const WEB_PORT = 8000;
 const WEBSOCKET_PORT = 5010;
+const CRAWLER_CONTROL_PORT = 5011;
+const CRAWLER_IMAGE_HOST = process.env.CRAWLER_IMAGE_HOST || '127.0.0.1';
+const CRAWLER_CONTROL_HOST = process.env.CRAWLER_CONTROL_HOST || '127.0.0.1';
 
 class ImageFlasherServer {
     constructor() {
         this.webServer = null;
         this.pythonProcess = null;
         this.running = false;
+        this.crawlerControlHost = CRAWLER_CONTROL_HOST;
     }
 
-    async start(mode = 'ikeda', subreddit = 'worldnews') {
+    async start(options = {}) {
+        const mode = options.mode || 'ikeda';
+        const subreddit = options.subreddit || 'worldnews';
+        this.crawlerControlHost = options.crawlerControlHost || CRAWLER_CONTROL_HOST;
         console.log('🚀 Starting ImageFlasherWGPU Server');
         console.log('====================================');
 
@@ -33,7 +41,7 @@ class ImageFlasherServer {
             await this.startWebServer();
             
             // Start Python image server
-            await this.startImageServer(mode, subreddit);
+            await this.startImageServer(options);
             
             this.running = true;
             this.printStatus(mode, subreddit);
@@ -47,9 +55,40 @@ class ImageFlasherServer {
         }
     }
 
+    sendCrawlerCommand(command) {
+        return new Promise((resolve, reject) => {
+            const ws = new WebSocket(`ws://${this.crawlerControlHost}:${CRAWLER_CONTROL_PORT}`);
+            const timeout = setTimeout(() => {
+                ws.terminate();
+                reject(new Error('Crawler control request timed out'));
+            }, 5000);
+
+            ws.on('open', () => {
+                ws.send(JSON.stringify(command));
+            });
+
+            ws.on('message', (data) => {
+                clearTimeout(timeout);
+                try {
+                    resolve(JSON.parse(data.toString()));
+                } catch (error) {
+                    reject(error);
+                } finally {
+                    ws.close();
+                }
+            });
+
+            ws.on('error', (error) => {
+                clearTimeout(timeout);
+                reject(error);
+            });
+        });
+    }
+
     startWebServer() {
         return new Promise((resolve, reject) => {
             const app = express();
+            app.use(express.json({ limit: '64kb' }));
 
             // CORS headers for WebGPU - MUST be set before static files
             app.use((req, res, next) => {
@@ -91,6 +130,45 @@ class ImageFlasherServer {
                 });
             });
 
+            app.post('/api/crawler/keywords', async (req, res) => {
+                try {
+                    const keywords = Array.isArray(req.body?.keywords)
+                        ? req.body.keywords
+                        : String(req.body?.keywords || '').split(',');
+                    const response = await this.sendCrawlerCommand({
+                        type: 'set_keywords',
+                        keywords
+                    });
+                    res.json(response);
+                } catch (error) {
+                    res.status(503).json({ ok: false, error: error.message });
+                }
+            });
+
+            app.post('/api/crawler/seeds', async (req, res) => {
+                try {
+                    const seeds = Array.isArray(req.body?.seeds)
+                        ? req.body.seeds
+                        : String(req.body?.seeds || '').split(/\s+/);
+                    const response = await this.sendCrawlerCommand({
+                        type: 'add_seeds',
+                        seeds
+                    });
+                    res.json(response);
+                } catch (error) {
+                    res.status(503).json({ ok: false, error: error.message });
+                }
+            });
+
+            app.get('/api/crawler/state', async (req, res) => {
+                try {
+                    const response = await this.sendCrawlerCommand({ type: 'get_state' });
+                    res.json(response);
+                } catch (error) {
+                    res.status(503).json({ ok: false, error: error.message });
+                }
+            });
+
             // Start the server
             this.webServer = app.listen(WEB_PORT, () => {
                 console.log('✅ Web server started successfully');
@@ -105,8 +183,12 @@ class ImageFlasherServer {
         });
     }
 
-    startImageServer(mode, subreddit) {
+    startImageServer(options = {}) {
         return new Promise((resolve, reject) => {
+            const mode = options.mode || 'ikeda';
+            const subreddit = options.subreddit || 'worldnews';
+            const crawlerImageHost = options.crawlerImageHost || CRAWLER_IMAGE_HOST;
+            const crawlerControlHost = options.crawlerControlHost || CRAWLER_CONTROL_HOST;
             let scriptPath;
             let args = [];
             // Resolve Python interpreter: prefer project's .venv if available
@@ -125,6 +207,22 @@ class ImageFlasherServer {
                     scriptPath = path.join(__dirname, 'src', 'python', 'scraper_3.py');
                     args = ['--subreddit', subreddit];
                     console.log(`🔍 Starting Reddit crawler (r/${subreddit})...`);
+                    break;
+                case 'web-crawler':
+                    scriptPath = path.join(__dirname, 'src', 'python', 'web_crawler_server.py');
+                    args = [
+                        '--image-host', crawlerImageHost,
+                        '--image-port', String(WEBSOCKET_PORT),
+                        '--control-host', crawlerControlHost,
+                        '--control-port', String(CRAWLER_CONTROL_PORT)
+                    ];
+                    for (const keyword of options.keywords || []) {
+                        args.push('--keyword', keyword);
+                    }
+                    for (const seed of options.seeds || []) {
+                        args.push('--seed', seed);
+                    }
+                    console.log('🔎 Starting generic topic-steered web crawler...');
                     break;
                 default:
                     scriptPath = path.join(__dirname, 'src', 'python', 'ImageCreator_Ikeda.py');
@@ -152,7 +250,9 @@ class ImageFlasherServer {
                 console.error(`[Python Error] ${data.toString().trim()}`);
             });
 
+            let exitedBeforeStartup = false;
             this.pythonProcess.on('close', (code) => {
+                exitedBeforeStartup = true;
                 if (code !== 0 && this.running) {
                     console.error(`❌ Python process exited with code ${code}`);
                 } else {
@@ -165,16 +265,45 @@ class ImageFlasherServer {
                 reject(error);
             });
 
-            // Give Python process time to start
-            setTimeout(() => {
-                if (this.pythonProcess && !this.pythonProcess.killed) {
-                    console.log('✅ Image server started successfully');
-                    console.log(`📡 WebSocket server on port: ${WEBSOCKET_PORT}`);
-                    resolve();
-                } else {
-                    reject(new Error('Python process failed to start'));
+            const waitForProcess = () => {
+                setTimeout(() => {
+                    if (exitedBeforeStartup || !this.pythonProcess || this.pythonProcess.killed) {
+                        reject(new Error('Python process failed to start'));
+                    } else {
+                        console.log('✅ Image server started successfully');
+                        console.log(`📡 WebSocket server on port: ${WEBSOCKET_PORT}`);
+                        resolve();
+                    }
+                }, 2000);
+            };
+
+            const waitForCrawlerControl = async () => {
+                const deadline = Date.now() + 8000;
+                while (Date.now() < deadline) {
+                    if (exitedBeforeStartup || !this.pythonProcess || this.pythonProcess.killed) {
+                        reject(new Error('Python crawler process exited before startup completed'));
+                        return;
+                    }
+                    try {
+                        const response = await this.sendCrawlerCommand({ type: 'get_state' });
+                        if (response && response.ok) {
+                            console.log('✅ Image server started successfully');
+                            console.log(`📡 WebSocket server on port: ${WEBSOCKET_PORT}`);
+                            resolve();
+                            return;
+                        }
+                    } catch (error) {
+                        await new Promise((r) => setTimeout(r, 250));
+                    }
                 }
-            }, 2000);
+                reject(new Error('Python crawler control service did not respond'));
+            };
+
+            if (mode === 'web-crawler') {
+                waitForCrawlerControl();
+            } else {
+                waitForProcess();
+            }
         });
     }
 
@@ -188,6 +317,9 @@ class ImageFlasherServer {
         
         if (mode === 'reddit') {
             console.log(`📱 Subreddit: r/${subreddit}`);
+        } else if (mode === 'web-crawler') {
+            console.log(`🧭 Crawler Control API: http://localhost:${WEB_PORT}/api/crawler/state`);
+            console.log(`🎛️  Crawler Control WS: ws://${this.crawlerControlHost}:${CRAWLER_CONTROL_PORT}`);
         }
         
         console.log('\n💡 Features:');
@@ -241,6 +373,10 @@ function parseArgs() {
     const args = process.argv.slice(2);
     let mode = 'ikeda';
     let subreddit = 'worldnews';
+    let keywords = [];
+    let seeds = [];
+    let crawlerImageHost = CRAWLER_IMAGE_HOST;
+    let crawlerControlHost = CRAWLER_CONTROL_HOST;
 
     for (let i = 0; i < args.length; i++) {
         switch (args[i]) {
@@ -252,6 +388,35 @@ function parseArgs() {
                 break;
             case '--reddit':
                 mode = 'reddit';
+                break;
+            case '--web-crawler':
+                mode = 'web-crawler';
+                break;
+            case '--keyword':
+            case '--keywords':
+                if (i + 1 < args.length) {
+                    keywords = args[i + 1].split(',').map((value) => value.trim()).filter(Boolean);
+                    i++;
+                }
+                break;
+            case '--seed':
+            case '--seeds':
+                if (i + 1 < args.length) {
+                    seeds = args[i + 1].split(',').map((value) => value.trim()).filter(Boolean);
+                    i++;
+                }
+                break;
+            case '--crawler-image-host':
+                if (i + 1 < args.length) {
+                    crawlerImageHost = args[i + 1];
+                    i++;
+                }
+                break;
+            case '--crawler-control-host':
+                if (i + 1 < args.length) {
+                    crawlerControlHost = args[i + 1];
+                    i++;
+                }
                 break;
             case '--subreddit':
                 if (i + 1 < args.length) {
@@ -270,12 +435,18 @@ Options:
   --ikeda              Use Ikeda data visualization mode (default)
   --generated          Use generated images mode  
   --reddit             Use Reddit scraper mode
+  --web-crawler        Use generic topic-steered web crawler mode
   --subreddit <name>   Specify subreddit for Reddit mode (default: worldnews)
+  --keywords <terms>   Comma-separated crawler keywords
+  --seeds <urls>       Comma-separated crawler seed URLs
+  --crawler-image-host <host>   Image WebSocket bind host (default: ${CRAWLER_IMAGE_HOST})
+  --crawler-control-host <host> Control WebSocket bind host (default: ${CRAWLER_CONTROL_HOST})
   --help, -h           Show this help message
 
 Examples:
   node server.js                           # Ikeda mode (default)
   node server.js --reddit --subreddit cats # Reddit cats images
+  node server.js --web-crawler --keywords cats --seeds https://example.com
   node server.js --generated               # Generated images
                 `);
                 process.exit(0);
@@ -283,14 +454,14 @@ Examples:
         }
     }
 
-    return { mode, subreddit };
+    return { mode, subreddit, keywords, seeds, crawlerImageHost, crawlerControlHost };
 }
 
 // Main execution
 if (require.main === module) {
-    const { mode, subreddit } = parseArgs();
+    const options = parseArgs();
     const server = new ImageFlasherServer();
-    server.start(mode, subreddit);
+    server.start(options);
 }
 
 module.exports = ImageFlasherServer; 

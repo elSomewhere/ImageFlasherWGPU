@@ -4,10 +4,20 @@
 Module['onRuntimeInitialized'] = () => {
     console.log("WASM runtime initialized. Setting up restructured Ikeda control system...");
 
+    function getImageWebSocketUrl() {
+        const params = new URLSearchParams(window.location.search);
+        const explicitUrl = params.get('imageWs');
+        if (explicitUrl) return explicitUrl;
+
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const hostname = window.location.hostname || '127.0.0.1';
+        return `${protocol}//${hostname}:5010`;
+    }
+
     // ------------------------------------------------------------------------
     // 1) WebSocket Connection with Enhanced Data Handling
     // ------------------------------------------------------------------------
-    const ws = new WebSocket("ws://127.0.0.1:5010");
+    const ws = new WebSocket(getImageWebSocketUrl());
     ws.binaryType = 'arraybuffer';
 
     let imageCounter = 0;
@@ -475,6 +485,8 @@ Module['onRuntimeInitialized'] = () => {
         resetDefaults();
     });
 
+    setupCrawlerControls();
+
     // ------------------------------------------------------------------------
     // 7) Initialize System
     // ------------------------------------------------------------------------
@@ -491,6 +503,127 @@ Module['onRuntimeInitialized'] = () => {
     
     console.log("Restructured Ikeda control system initialized with preprocessing/postprocessing pipeline");
     console.log("Keyboard shortcuts active - Press C for color toggle, G/D/B/F/S/M/P/N for postprocessing modes");
+
+    function parseListInput(value) {
+        return value
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean);
+    }
+
+    async function crawlerRequest(path, options = {}) {
+        const response = await fetch(path, {
+            headers: { 'Content-Type': 'application/json' },
+            ...options
+        });
+        const body = await response.json();
+        if (!response.ok || body.ok === false) {
+            throw new Error(body.error || `Request failed: ${response.status}`);
+        }
+        return body;
+    }
+
+    function renderCrawlerState(state) {
+        const payload = state.state || state;
+        const keywords = (payload.keywords || []).join(', ') || 'none';
+        const status = `keywords: ${keywords} | frontier: ${payload.frontier_size ?? '--'} | queue: ${payload.queue_size ?? '--'} | pages: ${payload.pages_visited ?? '--'} | candidates: ${payload.image_candidates ?? '--'} | images: ${payload.images_accepted ?? '--'}/${payload.images_rejected ?? '--'}`;
+        const panel = document.getElementById('crawlerStatus');
+        const label = document.getElementById('crawlerStatusLabel');
+        if (panel) panel.textContent = status;
+        if (label) label.textContent = `${payload.queue_size ?? 0}/${payload.images_accepted ?? 0}`;
+        renderCrawlerLog(payload.recent_events || [], payload.recent_errors || []);
+    }
+
+    function escapeHtml(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function renderCrawlerLog(events, errors) {
+        const log = document.getElementById('crawlerLog');
+        if (!log) return;
+
+        const recentEvents = events.slice(-12).reverse();
+        if (recentEvents.length === 0 && errors.length === 0) {
+            log.textContent = 'Crawler log: no events yet';
+            return;
+        }
+
+        const rows = recentEvents.map((event) => {
+            const type = escapeHtml(event.type || 'event');
+            const time = escapeHtml(event.time || '--:--:--');
+            const message = escapeHtml(event.message || '');
+            return `<div class="crawler-log-entry"><strong>${time} ${type}</strong>: ${message}</div>`;
+        });
+
+        if (errors.length > 0 && recentEvents.length === 0) {
+            rows.push(...errors.slice(-5).reverse().map((error) => {
+                return `<div class="crawler-log-entry"><strong>error</strong>: ${escapeHtml(error)}</div>`;
+            }));
+        }
+
+        log.innerHTML = rows.join('');
+    }
+
+    async function refreshCrawlerState() {
+        try {
+            const state = await crawlerRequest('/api/crawler/state');
+            renderCrawlerState(state);
+        } catch (error) {
+            const panel = document.getElementById('crawlerStatus');
+            const label = document.getElementById('crawlerStatusLabel');
+            const log = document.getElementById('crawlerLog');
+            if (panel) panel.textContent = `Crawler: ${error.message}`;
+            if (label) label.textContent = 'offline';
+            if (log) log.textContent = `Crawler log: ${error.message}`;
+        }
+    }
+
+    function setupCrawlerControls() {
+        const keywordInput = document.getElementById('crawlerKeywords');
+        const seedInput = document.getElementById('crawlerSeed');
+        const keywordButton = document.getElementById('applyCrawlerKeywords');
+        const seedButton = document.getElementById('addCrawlerSeed');
+
+        if (keywordButton && keywordInput) {
+            keywordButton.addEventListener('click', async () => {
+                try {
+                    const keywords = parseListInput(keywordInput.value);
+                    const state = await crawlerRequest('/api/crawler/keywords', {
+                        method: 'POST',
+                        body: JSON.stringify({ keywords })
+                    });
+                    renderCrawlerState(state);
+                    flashModeIndicator('CRAWLER KEYWORDS');
+                } catch (error) {
+                    document.getElementById('crawlerStatus').textContent = `Crawler: ${error.message}`;
+                }
+            });
+        }
+
+        if (seedButton && seedInput) {
+            seedButton.addEventListener('click', async () => {
+                try {
+                    const seed = seedInput.value.trim();
+                    const state = await crawlerRequest('/api/crawler/seeds', {
+                        method: 'POST',
+                        body: JSON.stringify({ seeds: seed ? [seed] : [] })
+                    });
+                    renderCrawlerState(state);
+                    flashModeIndicator('CRAWLER SEED');
+                } catch (error) {
+                    document.getElementById('crawlerStatus').textContent = `Crawler: ${error.message}`;
+                }
+            });
+        }
+
+        refreshCrawlerState();
+        setInterval(refreshCrawlerState, 3000);
+    }
 };
 
 // Enhanced error handling for WebAssembly initialization
