@@ -197,6 +197,7 @@
     "start:ikeda": "node server.js --ikeda",
     "start:reddit": "node server.js --reddit", 
     "start:generated": "node server.js --generated",
+    "start:web-crawler": "node server.js --web-crawler",
     "dev": "npm run build && npm run start",
     "clean": "rm -rf build/ && rm -f public/index.js public/index.wasm",
     "stop": "pkill -f 'node server.js' || true",
