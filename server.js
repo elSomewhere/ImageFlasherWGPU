@@ -15,23 +15,29 @@ const fs = require('fs');
 const WebSocket = require('ws');
 
 // Configuration
-const WEB_PORT = 8000;
-const WEBSOCKET_PORT = 5010;
-const CRAWLER_CONTROL_PORT = 5011;
+const WEB_PORT = Number(process.env.WEB_PORT || 8000);
+const WEBSOCKET_PORT = Number(process.env.WEBSOCKET_PORT || 5010);
+const CRAWLER_CONTROL_PORT = Number(process.env.CRAWLER_CONTROL_PORT || 5011);
 const CRAWLER_IMAGE_HOST = process.env.CRAWLER_IMAGE_HOST || '127.0.0.1';
 const CRAWLER_CONTROL_HOST = process.env.CRAWLER_CONTROL_HOST || '127.0.0.1';
+const CRAWLER_EXPLORATION = process.env.CRAWLER_EXPLORATION || '0.55';
+const CRAWLER_CONTENT_POLICY = process.env.CRAWLER_CONTENT_POLICY || 'broad';
+const CRAWLER_PAGE_DELAY = process.env.CRAWLER_PAGE_DELAY || '1.0';
+const CRAWLER_GLOBAL_CONCURRENCY = process.env.CRAWLER_GLOBAL_CONCURRENCY || '16';
 
 class ImageFlasherServer {
     constructor() {
         this.webServer = null;
         this.pythonProcess = null;
         this.running = false;
+        this.mode = 'ikeda';
         this.crawlerControlHost = CRAWLER_CONTROL_HOST;
     }
 
     async start(options = {}) {
         const mode = options.mode || 'ikeda';
         const subreddit = options.subreddit || 'worldnews';
+        this.mode = mode;
         this.crawlerControlHost = options.crawlerControlHost || CRAWLER_CONTROL_HOST;
         console.log('🚀 Starting ImageFlasherWGPU Server');
         console.log('====================================');
@@ -130,6 +136,15 @@ class ImageFlasherServer {
                 });
             });
 
+            app.get('/api/runtime-config', (req, res) => {
+                res.json({
+                    websocket_port: WEBSOCKET_PORT,
+                    crawler_control_port: CRAWLER_CONTROL_PORT,
+                    crawler_enabled: this.mode === 'web-crawler',
+                    mode: this.mode
+                });
+            });
+
             app.post('/api/crawler/keywords', async (req, res) => {
                 try {
                     const keywords = Array.isArray(req.body?.keywords)
@@ -153,6 +168,42 @@ class ImageFlasherServer {
                     const response = await this.sendCrawlerCommand({
                         type: 'add_seeds',
                         seeds
+                    });
+                    res.json(response);
+                } catch (error) {
+                    res.status(503).json({ ok: false, error: error.message });
+                }
+            });
+
+            app.post('/api/crawler/exploration', async (req, res) => {
+                try {
+                    const response = await this.sendCrawlerCommand({
+                        type: 'set_exploration',
+                        exploration: Number(req.body?.exploration)
+                    });
+                    res.json(response);
+                } catch (error) {
+                    res.status(503).json({ ok: false, error: error.message });
+                }
+            });
+
+            app.post('/api/crawler/autopilot', async (req, res) => {
+                try {
+                    const response = await this.sendCrawlerCommand({
+                        type: 'set_autopilot',
+                        enabled: Boolean(req.body?.enabled)
+                    });
+                    res.json(response);
+                } catch (error) {
+                    res.status(503).json({ ok: false, error: error.message });
+                }
+            });
+
+            app.post('/api/crawler/content-policy', async (req, res) => {
+                try {
+                    const response = await this.sendCrawlerCommand({
+                        type: 'set_content_policy',
+                        policy: String(req.body?.policy || 'broad')
                     });
                     res.json(response);
                 } catch (error) {
@@ -201,11 +252,16 @@ class ImageFlasherServer {
                 case 'ikeda':
                 case 'generated':
                     scriptPath = path.join(__dirname, 'src', 'python', 'ImageCreator_Ikeda.py');
+                    args = ['--host', crawlerImageHost, '--port', String(WEBSOCKET_PORT)];
                     console.log('🎨 Starting Ikeda data visualization server...');
                     break;
                 case 'reddit':
                     scriptPath = path.join(__dirname, 'src', 'python', 'scraper_3.py');
-                    args = ['--subreddit', subreddit];
+                    args = [
+                        '--subreddit', subreddit,
+                        '--host', crawlerImageHost,
+                        '--port', String(WEBSOCKET_PORT)
+                    ];
                     console.log(`🔍 Starting Reddit crawler (r/${subreddit})...`);
                     break;
                 case 'web-crawler':
@@ -214,7 +270,11 @@ class ImageFlasherServer {
                         '--image-host', crawlerImageHost,
                         '--image-port', String(WEBSOCKET_PORT),
                         '--control-host', crawlerControlHost,
-                        '--control-port', String(CRAWLER_CONTROL_PORT)
+                        '--control-port', String(CRAWLER_CONTROL_PORT),
+                        '--exploration', CRAWLER_EXPLORATION,
+                        '--content-policy', CRAWLER_CONTENT_POLICY,
+                        '--page-delay', CRAWLER_PAGE_DELAY,
+                        '--global-concurrency', CRAWLER_GLOBAL_CONCURRENCY
                     ];
                     for (const keyword of options.keywords || []) {
                         args.push('--keyword', keyword);
@@ -226,6 +286,7 @@ class ImageFlasherServer {
                     break;
                 default:
                     scriptPath = path.join(__dirname, 'src', 'python', 'ImageCreator_Ikeda.py');
+                    args = ['--host', crawlerImageHost, '--port', String(WEBSOCKET_PORT)];
                     console.log('🎨 Starting default Ikeda server...');
             }
 
@@ -464,4 +525,4 @@ if (require.main === module) {
     server.start(options);
 }
 
-module.exports = ImageFlasherServer; 
+module.exports = ImageFlasherServer;

@@ -16,12 +16,14 @@ from crawler.adapters.compliance.robots import RobotsGuard
 from crawler.adapters.compliance.ssrf import SsrfGuard
 from crawler.adapters.extractors.html import HtmlExtractor, discover, normalize_url, parse_srcset
 from crawler.adapters.image_pipeline import normalize_image
+from crawler.adapters.processors import ImageProcessor
 from crawler.adapters.inmemory_world import InMemoryWorld
 from crawler.adapters.seeds.commons import CommonsImageSource
 from crawler.core.frontier import FrontierItem, URLFrontier
 from crawler.core.steering import TopicState
 from crawler.core.types import Artifact
 from crawler.ports.world import FetchError, Resource
+from crawler.ports.processor import ProcessorRegistry
 from crawler.runtime.control import ControlPlane
 from crawler.runtime.engine import CrawlEngine
 from crawler.runtime.profile import Profile
@@ -57,6 +59,16 @@ def build_engine(world, *, image_source=None, profile=None) -> CrawlEngine:
         extractor=HtmlExtractor(),
         sink=_CollectingSink(),
         image_source=image_source,
+        processors=ProcessorRegistry(
+            [
+                ImageProcessor(
+                    size=profile.image_size,
+                    min_width=profile.min_image_width,
+                    min_height=profile.min_image_height,
+                    max_pixels=profile.max_image_pixels,
+                )
+            ]
+        ),
     )
 
 
@@ -449,7 +461,7 @@ class SeedingTests(unittest.TestCase):
         self.assertEqual(source.polls, 1)
         self.assertEqual(len(engine.frontier), 1)  # seeded, did not sleep
 
-    def test_restart_probability_scales_with_temperature(self):
+    def test_restart_probability_scales_with_exploration(self):
         engine = CrawlEngine(
             Profile(restart_probability=0.1),
             page_world=InMemoryWorld({}),
@@ -457,10 +469,10 @@ class SeedingTests(unittest.TestCase):
             extractor=HtmlExtractor(),
             sink=_CollectingSink(),
         )
-        engine.temperature = 0.0
-        self.assertEqual(engine.restart_probability(), 0.0)
-        engine.temperature = 2.0
-        self.assertAlmostEqual(engine.restart_probability(), 0.2)
+        engine.set_exploration(0.0)
+        cold = engine.restart_probability()
+        engine.set_exploration(1.0)
+        self.assertGreater(engine.restart_probability(), cold)
 
 
 class TemperatureControllerTests(unittest.TestCase):
@@ -495,10 +507,10 @@ class TemperatureControllerTests(unittest.TestCase):
 
     def test_engine_adaptive_mode_updates_temperature(self):
         engine = build_engine(InMemoryWorld({}), profile=Profile(temperature_mode="adaptive"))
-        self.assertIsNotNone(engine.temperature_controller)
+        self.assertTrue(engine.autopilot.enabled)
         engine.last_novelty = 0.0
         run(engine.crawl_once(worker_id=0))  # empty frontier, but controller still ticks
-        self.assertEqual(engine.state()["temperature_mode"], "adaptive")
+        self.assertEqual(engine.state()["temperature_mode"], "autopilot")
 
 
 class NoveltyTests(unittest.TestCase):

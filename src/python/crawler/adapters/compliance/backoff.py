@@ -8,18 +8,20 @@ polite response to being throttled and directly reduces dropped media on busy CD
 from __future__ import annotations
 
 import asyncio
+import random
 
 from ...ports.world import FetchError, Resource, World
 
-RETRY_STATUSES = frozenset({429, 503})
+RETRY_STATUSES = frozenset({429, 502, 503, 504})
 
 
 class BackoffOnStatus:
-    def __init__(self, inner: World, max_retries: int = 2, base_delay: float = 1.0, cap: float = 30.0) -> None:
+    def __init__(self, inner: World, max_retries: int = 2, base_delay: float = 1.0, cap: float = 30.0, rng=None) -> None:
         self.inner = inner
         self.max_retries = max_retries
         self.base_delay = base_delay
         self.cap = cap
+        self.rng = rng or random.Random()
 
     async def fetch(self, url: str) -> Resource:
         attempt = 0
@@ -29,6 +31,11 @@ class BackoffOnStatus:
             except FetchError as error:
                 if error.status not in RETRY_STATUSES or attempt >= self.max_retries:
                     raise
-                delay = error.retry_after if error.retry_after is not None else self.base_delay * (2 ** attempt)
+                delay = error.retry_after if error.retry_after is not None else self.rng.uniform(0.0, self.base_delay * (2 ** attempt))
                 await asyncio.sleep(min(delay, self.cap))
                 attempt += 1
+
+    async def close(self) -> None:
+        close = getattr(self.inner, "close", None)
+        if callable(close):
+            await close()

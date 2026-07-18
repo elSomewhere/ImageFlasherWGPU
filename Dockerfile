@@ -1,49 +1,30 @@
-# Multi-stage Dockerfile for ImageFlasherWGPU
-FROM node:18-alpine as base
+FROM node:20-bookworm-slim
 
-# Install system dependencies for Python and compilation
-RUN apk add --no-cache python3 py3-pip build-base python3-dev \
-    cairo-dev pango-dev jpeg-dev freetype-dev \
-    pkgconfig
+ENV NODE_ENV=production \
+    PYTHONUNBUFFERED=1 \
+    PATH=/opt/venv/bin:$PATH
 
-# Create app directory
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-venv libgl1 libglib2.0-0 build-essential pkg-config \
+        libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# Copy package files
-COPY package*.json ./
-COPY requirements.txt ./
+COPY package.json package-lock.json requirements.txt ./
+RUN npm ci --omit=dev \
+    && python3 -m venv /opt/venv \
+    && pip install --no-cache-dir -r requirements.txt
 
-# Install Node.js dependencies
-RUN npm ci --only=production
-
-# Install Python dependencies
-RUN pip3 install --no-cache-dir -r requirements.txt
-
-# Copy application code
 COPY . .
+RUN test -f public/index.js && test -f public/index.wasm \
+    && chown -R node:node /app
 
-# Build WebAssembly modules if not already built
-# Note: In production, you should build these in CI/CD and copy the artifacts
-RUN if [ ! -f "public/index.wasm" ]; then \
-        echo "Warning: WASM files not found. Building from source..." && \
-        apk add --no-cache emscripten && \
-        npm run build:wasm || echo "WASM build failed, using pre-built files"; \
-    fi
+USER node
 
-# Create non-root user for security
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S appuser -u 1001
-
-# Change ownership of app directory
-RUN chown -R appuser:nodejs /app
-USER appuser
-
-# Expose ports
 EXPOSE 8000 5010
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD node -e "fetch('http://127.0.0.1:8000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
 
-# Start the application in Reddit mode by default
-CMD ["node", "server.js", "--reddit", "--subreddit", "worldnews"]
+CMD ["node", "server.js", "--web-crawler"]

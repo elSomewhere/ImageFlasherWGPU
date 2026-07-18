@@ -4,16 +4,18 @@ import time
 import threading
 import random
 import io
+import argparse
 from collections import deque
 from typing import Optional, List
 
 import requests
-import websockets
-from websockets import WebSocketServerProtocol
 from bs4 import BeautifulSoup
 import numpy as np
 import cv2
 from PIL import Image, ImageDraw, ImageChops, ImageOps
+
+from crawler.adapters.sinks.websocket import ArtifactBroker
+from crawler.core.types import Artifact, RightsMetadata
 
 # ------------------------------------------------------------------------------------
 # 1) VHS effect code from your example (OpenCV + Pillow).
@@ -119,7 +121,7 @@ def apply_vhs_filter_pil(img: Image.Image) -> Image.Image:
 # 2) Global FIFO queue to store the processed images (as PNG bytes).
 #    Use maxlen to avoid unbounded growth.
 # ------------------------------------------------------------------------------------
-SCRAPED_IMAGES = deque(maxlen=1000)
+SCRAPED_IMAGES = deque(maxlen=256)
 
 
 # ------------------------------------------------------------------------------------
@@ -142,9 +144,8 @@ def scrape_subreddit_images(
 
     headers = {
         "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-            " AppleWebKit/537.36 (KHTML, like Gecko)"
-            " Chrome/111.0.0.0 Safari/537.36"
+            "ImageFlasherBot/2.0 "
+            "(+https://github.com/elSomewhere/ImageFlasherWGPU; Reddit image source)"
         )
     }
     base_url = "https://old.reddit.com"
@@ -157,7 +158,7 @@ def scrape_subreddit_images(
 
     while pages_scraped < max_pages and next_page_url:
         print(f"[SCRAPER] Fetching page {pages_scraped + 1}: {next_page_url}")
-        resp = requests.get(next_page_url, headers=headers)
+        resp = requests.get(next_page_url, headers=headers, timeout=10)
         if resp.status_code != 200:
             print(f"[SCRAPER] ERROR: Got status {resp.status_code}, stopping.")
             break
@@ -183,7 +184,7 @@ def scrape_subreddit_images(
                 visited_urls.add(src)
                 # Download + Transform
                 try:
-                    r_img = requests.get(src, timeout=5)
+                    r_img = requests.get(src, headers=headers, timeout=5)
                     if r_img.status_code == 200 and r_img.content:
                         # Convert to Pillow
                         img_bytes = io.BytesIO(r_img.content)
@@ -201,7 +202,7 @@ def scrape_subreddit_images(
                         out_buf.seek(0)
 
                         # Store in global queue
-                        SCRAPED_IMAGES.append(out_buf.read())
+                        SCRAPED_IMAGES.append((out_buf.read(), src, next_page_url))
                         print(f"[SCRAPER] Scraped & stored image from {src}")
                     else:
                         print(f"[SCRAPER] Could not download {src} (status={r_img.status_code}).")
@@ -234,61 +235,65 @@ def scrape_subreddit_images(
 WS_HOST = "localhost"
 WS_PORT = 5010
 
-SEND_DELAY = 0.5  # seconds between sends (you can adjust as needed)
+async def publish_images(broker: ArtifactBroker):
+    while True:
+        if not SCRAPED_IMAGES:
+            await asyncio.sleep(0.25)
+            continue
+        img_data, source_url, page_url = SCRAPED_IMAGES.popleft()
+        await broker.emit(
+            Artifact(
+                kind="image",
+                payload=img_data,
+                width=512,
+                height=512,
+                source_url=source_url,
+                page_url=page_url,
+                mime="image/png",
+                producer="reddit",
+                rights=RightsMetadata(
+                    status="unknown",
+                    attribution_url=source_url,
+                    transformation="resized and VHS processed",
+                ),
+            )
+        )
 
 
-async def image_sender(websocket: WebSocketServerProtocol):
-    """
-    Repeatedly send images from SCRAPED_IMAGES to the client.
-    If the queue is empty, we wait until it has something.
-    """
-    print("[WS] Client connected.")
-    try:
-        while True:
-            if SCRAPED_IMAGES:
-                # Pop the oldest image from the left and send it
-                img_data = SCRAPED_IMAGES.popleft()
-                await websocket.send(img_data)
-                print("[WS] Sent a scraped image.")
-            else:
-                print("[WS] No images in queue, waiting...")
-                # Sleep a bit to avoid busy-loop
-                await asyncio.sleep(1.0)
+async def start_server(subreddit: str, host: str = WS_HOST, port: int = WS_PORT):
+    print(f"[WS] Starting WebSocket server at ws://{host}:{port}")
+    broker = ArtifactBroker(host, port, capacity=256, client_queue_size=32)
 
-            await asyncio.sleep(SEND_DELAY)
-    except websockets.ConnectionClosed:
-        print("[WS] Client disconnected.")
-    except Exception as e:
-        print("[WS] Unhandled error in image_sender:", e)
-
-
-async def start_server():
-    print(f"[WS] Starting WebSocket server at ws://{WS_HOST}:{WS_PORT}")
-    async with websockets.serve(image_sender, WS_HOST, WS_PORT):
-        await asyncio.Future()  # Run forever
+    thread = threading.Thread(
+        target=lambda: scrape_subreddit_images(
+            subreddit=subreddit,
+            max_pages=3,
+            skip_keywords=["icon"],
+            page_delay=2.0,
+            image_delay=1.0,
+        ),
+        daemon=True,
+    )
+    thread.start()
+    publisher = asyncio.create_task(publish_images(broker))
+    async with broker.serve():
+        try:
+            await asyncio.Future()
+        finally:
+            publisher.cancel()
+            await asyncio.gather(publisher, return_exceptions=True)
 
 
 # ------------------------------------------------------------------------------------
 # 5) Main entry point: we do both the scraping (in a separate thread) and the WS server.
 # ------------------------------------------------------------------------------------
 def main():
-    # 1) Start scraping in a background thread
-    def scraping_thread():
-        # Example usage:
-        # - Scrape the 'cats' subreddit, up to 3 pages, skipping any URL containing "icon"
-        scrape_subreddit_images(
-            subreddit="worldnews",
-            max_pages=3,
-            skip_keywords=["icon"],
-            page_delay=2.0,
-            image_delay=1.0
-        )
-
-    thread = threading.Thread(target=scraping_thread, daemon=True)
-    thread.start()
-
-    # 2) Start the WebSocket server (async)
-    asyncio.run(start_server())
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--subreddit", default="worldnews")
+    parser.add_argument("--host", default=WS_HOST)
+    parser.add_argument("--port", type=int, default=WS_PORT)
+    args = parser.parse_args()
+    asyncio.run(start_server(args.subreddit, args.host, args.port))
 
 
 if __name__ == "__main__":

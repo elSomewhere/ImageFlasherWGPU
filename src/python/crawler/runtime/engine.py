@@ -1,32 +1,74 @@
-"""Layer 4 — the crawl engine.
-
-The media-agnostic worker loop. It only ever touches ports: a World to fetch, an
-Extractor to parse, an ArtifactSink to emit, plus the pure-core frontier and topic
-state. It has no idea whether the World is the real internet or an imagined one.
-"""
+"""Decoupled page traversal, media processing, and artifact publication engine."""
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import heapq
+import itertools
 import logging
 import random
+import re
 import time
-from collections import deque
-from urllib.parse import urlparse
+from collections import OrderedDict, deque
+from dataclasses import dataclass, field
+from urllib.parse import urlsplit, urlunsplit
 
-from ..adapters.image_pipeline import ImageValidationError, normalize_image
+from ..core.exploration import ExplorationAutopilot
 from ..core.frontier import FrontierItem, URLFrontier
-from ..core.scoring import ScorePolicy, host_of
-from ..core.signals.novelty import NoveltyArchive
+from ..core.scoring import ScorePolicy, registrable_domain
+from ..core.signals.novelty import VisualNoveltyArchive
 from ..core.steering import TopicState
-from ..core.temperature import make_controller
-from ..core.types import Artifact, Link, MediaCandidate
+from ..core.types import Link, MediaCandidate
+from ..core.url_policy import canonicalize_url, rejection_reason
 from ..ports.extractor import Extractor
+from ..ports.processor import ProcessorRegistry
 from ..ports.sink import ArtifactSink
 from ..ports.world import FetchError, World
 from .profile import Profile
 
 
 logger = logging.getLogger(__name__)
+WIKIMEDIA_THUMB = re.compile(r"(/wikipedia/commons)/thumb(/[^/]+/[^/]+/[^/]+)/(?:[^/]+)$")
+
+
+class _TTLLRUSet:
+    def __init__(self, capacity: int, ttl: float) -> None:
+        self.capacity = capacity
+        self.ttl = ttl
+        self._items: OrderedDict[str, float] = OrderedDict()
+
+    def add(self, value: str) -> bool:
+        now = time.monotonic()
+        previous = self._items.get(value)
+        if previous is not None and now - previous < self.ttl:
+            self._items.move_to_end(value)
+            return False
+        self._items[value] = now
+        self._items.move_to_end(value)
+        while len(self._items) > self.capacity:
+            self._items.popitem(last=False)
+        return True
+
+    def __contains__(self, value: str) -> bool:
+        previous = self._items.get(value)
+        if previous is None:
+            return False
+        if time.monotonic() - previous >= self.ttl:
+            self._items.pop(value, None)
+            return False
+        return True
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+
+@dataclass(order=True)
+class _MediaItem:
+    priority: float
+    sequence: int
+    candidate: MediaCandidate = field(compare=False)
+    page_title: str = field(compare=False, default="")
+    page_score: float = field(compare=False, default=0.0)
 
 
 class CrawlEngine:
@@ -42,6 +84,9 @@ class CrawlEngine:
         topic_state: TopicState | None = None,
         image_source=None,
         seed_sources=None,
+        processors: ProcessorRegistry | None = None,
+        scheduler=None,
+        robots_policy=None,
     ) -> None:
         self.profile = profile
         self.page_world = page_world
@@ -50,70 +95,114 @@ class CrawlEngine:
         self.sink = sink
         self.image_source = image_source
         self.seed_sources = list(seed_sources or [])
+        self.processors = processors or ProcessorRegistry()
+        self.scheduler = scheduler
+        self.robots_policy = robots_policy
         self.topic_state = topic_state or TopicState()
         self.rng = random.Random(profile.random_seed)
-        self.frontier = frontier or URLFrontier(max_size=profile.max_frontier_size, rng=self.rng)
-        # Live-tunable walk temperature (the control plane can adjust this at runtime).
-        self.temperature = profile.temperature
-        # Optional self-driving controller. None => manual/static temperature.
-        self.temperature_controller = make_controller(
-            profile.temperature_mode,
-            temperature=profile.temperature,
-            low=profile.temperature_min,
-            high=profile.temperature_max,
+        self.frontier = frontier or URLFrontier(
+            max_size=profile.max_frontier_size,
+            max_per_domain=profile.max_frontier_per_domain,
             rng=self.rng,
         )
 
-        # Multi-signal scoring. host_visits drives the host-freshness signal.
+        self.autopilot = ExplorationAutopilot(
+            profile.exploration,
+            enabled=profile.autopilot,
+            window=profile.novelty_window,
+            chapter_seconds=profile.chapter_seconds,
+            chapter_pages=profile.chapter_pages,
+        )
+        self.exploration = profile.exploration
+        self.temperature = self._temperature()
+        self.temperature_controller = None  # legacy state field
         self.host_visits: dict[str, int] = {}
         self.score_policy = ScorePolicy(
-            self.topic_state, self.rng, self.host_visits, focus=profile.focus
+            self.topic_state,
+            self.rng,
+            self.host_visits,
+            focus=profile.focus,
+            exploration=profile.exploration,
         )
-        # Optional novelty signal (unlike-recent-content) — also de-dups the wall.
-        self.novelty = (
-            NoveltyArchive(profile.novelty_capacity) if profile.enable_novelty else None
-        )
+        self.novelty = VisualNoveltyArchive(profile.novelty_capacity) if profile.enable_novelty else None
         self.last_novelty = 1.0
 
-        # Per-host in-flight locks: keep concurrent workers off the same host at once
-        # (politeness beyond the rate limiter; complements host-stratified sampling).
-        self._host_locks: dict[str, asyncio.Lock] = {}
-
-        self.seen_pages: deque[str] = deque(maxlen=profile.max_seen_urls)
-        self.seen_page_set: set[str] = set()
-        self.seen_images: deque[str] = deque(maxlen=profile.max_seen_urls)
-        self.seen_image_set: set[str] = set()
+        self.seen_page_set = _TTLLRUSet(profile.max_seen_urls, profile.seen_ttl_seconds)
+        self.seen_image_set = _TTLLRUSet(profile.max_seen_urls, profile.seen_ttl_seconds)
+        self._content_hashes = _TTLLRUSet(profile.max_seen_urls, profile.seen_ttl_seconds)
         self.recent_errors: deque[str] = deque(maxlen=20)
         self.recent_events: deque[dict] = deque(maxlen=80)
         self.pending_commons_keywords: deque[str] = deque()
         self.pending_commons_keyword_set: set[str] = set()
+        self.media_queue: asyncio.PriorityQueue[_MediaItem] = asyncio.PriorityQueue(
+            maxsize=profile.media_queue_size
+        )
+        self._media_sequence = itertools.count()
+        self._seed_cursor = 0
+        self._last_seed_page_count = 0
         self.stats = {
+            "pages_discovered": 0,
             "pages_visited": 0,
+            "pages_rejected": 0,
+            "link_candidates": 0,
+            "links_admitted": 0,
+            "links_rejected": 0,
             "image_candidates": 0,
+            "media_enqueued": 0,
+            "media_queue_dropped": 0,
+            "media_page_cap_dropped": 0,
+            "media_fetched": 0,
+            "media_processed": 0,
             "images_accepted": 0,
             "images_rejected": 0,
             "images_duplicate": 0,
-            "pages_rejected": 0,
+            "exact_duplicates": 0,
             "commons_api_queries": 0,
+            "teleports": 0,
         }
 
-    # -- state / bookkeeping ------------------------------------------------
+    def _temperature(self) -> float:
+        return self.profile.temperature_min + self.exploration * (
+            self.profile.temperature_max - self.profile.temperature_min
+        )
+
+    def set_exploration(self, value: float) -> float:
+        self.exploration = self.autopilot.set_base(value)
+        self.score_policy.exploration = self.exploration
+        self.score_policy.focus = 1.0 - self.exploration
+        self.temperature = self._temperature()
+        self.rescore_frontier()
+        return self.exploration
+
     def state(self) -> dict:
+        broker_state = getattr(self.sink, "state", lambda: {})()
+        scheduler_state = self.scheduler.state() if self.scheduler is not None else {}
+        robots_state = self.robots_policy.state() if self.robots_policy is not None else {}
         return {
             "ok": True,
             "keywords": self.topic_state.keywords,
+            "exploration": round(self.exploration, 4),
+            "autopilot": self.autopilot.enabled,
+            "content_policy": broker_state.get(
+                "content_policy", getattr(self.sink, "content_policy", "broad")
+            ),
+            "autopilot_signals": self.autopilot.signals(),
             "temperature": round(self.temperature, 4),
-            "temperature_mode": getattr(self.temperature_controller, "mode", "static"),
-            "focus": round(self.score_policy.focus, 4),
+            "temperature_mode": "autopilot" if self.autopilot.enabled else "static",
+            "focus": round(1.0 - self.exploration, 4),
             "novelty_enabled": self.novelty is not None,
             "distinct_hosts": len(self.host_visits),
             "frontier_size": len(self.frontier),
-            "queue_size": self._queue_size(),
+            "media_queue_size": self.media_queue.qsize(),
+            "queue_size": broker_state.get("broker_resident", self._queue_size()),
             "seen_pages": len(self.seen_page_set),
             "seen_images": len(self.seen_image_set),
             "pending_commons_keywords": len(self.pending_commons_keywords),
             "recent_errors": list(self.recent_errors),
             "recent_events": list(self.recent_events),
+            "broker": broker_state,
+            "scheduler": scheduler_state,
+            "robots": robots_state,
             **self.stats,
         }
 
@@ -122,22 +211,17 @@ class CrawlEngine:
         return qsize() if callable(qsize) else 0
 
     def remember_page(self, url: str) -> bool:
-        if url in self.seen_page_set:
-            return False
-        if len(self.seen_pages) == self.seen_pages.maxlen and self.seen_pages:
-            self.seen_page_set.discard(self.seen_pages[0])
-        self.seen_pages.append(url)
-        self.seen_page_set.add(url)
-        return True
+        return self.seen_page_set.add(url)
+
+    @staticmethod
+    def media_identity(url: str) -> str:
+        parsed = urlsplit(url)
+        match = WIKIMEDIA_THUMB.search(parsed.path)
+        path = match.group(1) + match.group(2) if match else parsed.path
+        return urlunsplit((parsed.scheme, parsed.netloc, path, parsed.query, ""))
 
     def remember_image(self, url: str) -> bool:
-        if url in self.seen_image_set:
-            return False
-        if len(self.seen_images) == self.seen_images.maxlen and self.seen_images:
-            self.seen_image_set.discard(self.seen_images[0])
-        self.seen_images.append(url)
-        self.seen_image_set.add(url)
-        return True
+        return self.seen_image_set.add(self.media_identity(url))
 
     def add_error(self, message: str) -> None:
         self.recent_errors.append(message[:300])
@@ -154,10 +238,9 @@ class CrawlEngine:
         self.recent_events.append(event)
         if event_type == "error":
             logger.warning("%s", message)
-        else:
+        elif event_type not in {"link"}:
             logger.info("%s", message)
 
-    # -- scoring (delegated to the pure ScorePolicy) ------------------------
     def inherited_link_score(self, referrer: FrontierItem) -> float:
         return referrer.score * 0.15
 
@@ -173,7 +256,6 @@ class CrawlEngine:
     def rescore_frontier(self) -> None:
         self.frontier.rebuild(self.score_frontier_item)
 
-    # -- frontier admission -------------------------------------------------
     def seed_from_keywords(self) -> None:
         for keyword in self.topic_state.keywords:
             if keyword not in self.pending_commons_keyword_set:
@@ -182,183 +264,238 @@ class CrawlEngine:
                 self.add_event("commons_queued", f"Queued Commons API search: {keyword}")
 
     def add_seed(self, url: str) -> bool:
-        from ..adapters.extractors.html import normalize_url
-
-        normalized = normalize_url(url)
-        parsed = urlparse(normalized)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            self.add_event("seed_rejected", f"Rejected seed URL: {url}")
+        normalized = canonicalize_url(url)
+        reason = rejection_reason(normalized) if normalized else "invalid_url"
+        if reason:
+            self.add_event("seed_rejected", f"Rejected seed URL: {url}", reason=reason)
             return False
         item = FrontierItem(
             url=normalized,
             depth=0,
             source="seed",
             context=normalized,
-            direct_score=self.topic_state.score_text(normalized),
             inherited_score=1.0,
         )
         item.score = self.score_frontier_item(item)
         added = self.frontier.add(item)
         if added:
+            self.stats["pages_discovered"] += 1
             self.add_event("seed", f"Queued seed: {normalized}", score=round(item.score, 3))
         return added
 
-    def add_link(self, url: str, context: str, referrer: FrontierItem) -> bool:
-        if referrer.depth + 1 > self.profile.max_depth:
+    def add_link(self, url: str, context: str, referrer: FrontierItem, *, nofollow: bool = False) -> bool:
+        if nofollow or referrer.depth + 1 > self.profile.max_depth:
+            self.stats["links_rejected"] += 1
             return False
-        # Steering biases the score; it no longer gates. Off-topic links stay in the
-        # frontier at a lower priority so the walk can still wander into them.
+        normalized = canonicalize_url(url, referrer.url)
+        reason = rejection_reason(normalized) if normalized else "invalid_url"
+        if reason or normalized in self.seen_page_set:
+            self.stats["links_rejected"] += 1
+            return False
         item = FrontierItem(
-            url=url,
+            url=normalized,
             depth=referrer.depth + 1,
             source="link",
             referrer=referrer.url,
             context=context,
-            direct_score=self.score_policy.relevance(url, context),
             inherited_score=self.inherited_link_score(referrer),
         )
-        item.score = self.score_policy.score_link(item)
+        item.score = self.score_frontier_item(item)
         added = self.frontier.add(item)
         if added:
-            self.add_event(
-                "link", f"Queued link: {url}", score=round(item.score, 3), depth=item.depth
-            )
+            self.stats["links_admitted"] += 1
+            self.stats["pages_discovered"] += 1
+        else:
+            self.stats["links_rejected"] += 1
         return added
 
-    # -- media --------------------------------------------------------------
-    async def handle_image_candidate(
-        self, candidate: MediaCandidate, page_title: str, page_score: float
-    ) -> None:
-        # Steering biases image ranking (see crawl_once) but does not reject: every
-        # candidate that survives dedup is fair game for the avalanche.
+    def _rank_links(self, links: list[Link], referrer: FrontierItem) -> list[Link]:
+        current_domain = registrable_domain(referrer.url)
+        candidates = [link for link in links if not link.nofollow]
+        for link in candidates:
+            link.score = self.score_policy.relevance(link.url, link.context)
+        external = [link for link in candidates if registrable_domain(link.url) != current_domain]
+        local = [link for link in candidates if registrable_domain(link.url) == current_domain]
+        self.rng.shuffle(external)
+        self.rng.shuffle(local)
+        external.sort(key=lambda link: link.score, reverse=True)
+        local.sort(key=lambda link: link.score, reverse=True)
+        ranked: list[Link] = []
+        while len(ranked) < 100 and (external or local):
+            prefer_external = self.rng.random() < (0.35 + 0.45 * self.exploration)
+            bucket = external if prefer_external and external else local if local else external
+            ranked.append(bucket.pop(0))
+        return ranked
+
+    def enqueue_media(self, candidate: MediaCandidate, page_title: str, page_score: float) -> bool:
         candidate.score = self.score_image(candidate, page_title, page_score)
         if not self.remember_image(candidate.url):
-            return
+            self.stats["images_duplicate"] += 1
+            return False
+        item = _MediaItem(
+            priority=-candidate.score,
+            sequence=next(self._media_sequence),
+            candidate=candidate,
+            page_title=page_title,
+            page_score=page_score,
+        )
+        try:
+            self.media_queue.put_nowait(item)
+        except asyncio.QueueFull:
+            self.stats["media_queue_dropped"] += 1
+            return False
+        self.stats["media_enqueued"] += 1
+        return True
 
+    async def handle_media_item(self, item: _MediaItem) -> None:
+        candidate = item.candidate
         try:
             resource = await self.media_world.fetch(candidate.url)
-            if not resource.content_type.startswith("image/"):
+            self.stats["media_fetched"] += 1
+            if candidate.kind == "image" and not resource.content_type.startswith("image/"):
                 raise FetchError(f"Not an image: {resource.content_type or 'unknown'}")
-            processed = await asyncio.to_thread(
-                normalize_image,
-                resource.body,
-                size=self.profile.image_size,
-                min_width=self.profile.min_image_width,
-                min_height=self.profile.min_image_height,
-            )
-            if self.novelty is not None:
-                self.last_novelty = self.novelty.novelty(processed.ahash)
+            processor = self.processors.get(candidate.kind)
+            artifact = await processor.process(candidate, resource, score=candidate.score)
+            digest = hashlib.sha256(artifact.payload).hexdigest()
+            if not self._content_hashes.add(digest):
+                self.stats["exact_duplicates"] += 1
+                self.stats["images_duplicate"] += 1
+                return
+            if self.novelty is not None and candidate.kind == "image":
+                dhash = int(artifact.metadata.get("dhash", 0))
+                histogram = tuple(artifact.metadata.get("color_histogram", ()))
+                self.last_novelty = self.novelty.novelty(dhash, histogram)
                 if self.last_novelty < self.profile.novelty_min:
                     self.stats["images_duplicate"] += 1
-                    self.add_event(
-                        "image_duplicate",
-                        f"Skipped near-duplicate: {resource.final_url}",
-                        novelty=round(self.last_novelty, 3),
-                    )
                     return
-                self.novelty.add(processed.ahash)
-            await self.sink.emit(
-                Artifact(
-                    kind="image",
-                    payload=processed.data,
-                    width=processed.width,
-                    height=processed.height,
-                    source_url=resource.final_url,
-                    page_url=candidate.page_url,
-                    score=candidate.score,
-                )
-            )
+                self.novelty.add(dhash, histogram)
+            artifact.novelty = self.last_novelty
+            published = await self.sink.emit(artifact)
+            self.stats["media_processed"] += 1
+            if published is False:
+                self.stats["images_rejected"] += 1
+                return
             self.stats["images_accepted"] += 1
+            domain = registrable_domain(artifact.source_url)
+            self.autopilot.record(novelty=artifact.novelty, domain=domain, kind=artifact.kind)
             self.add_event(
                 "image",
-                f"Accepted image: {resource.final_url}",
-                score=round(candidate.score, 3),
-                width=processed.width,
-                height=processed.height,
-                queue_size=self._queue_size(),
+                f"Accepted image: {artifact.source_url}",
+                novelty=round(artifact.novelty, 3),
+                broker_resident=self._queue_size(),
             )
-        except (FetchError, ImageValidationError, Exception) as error:
+        except Exception as error:  # a bad artifact must never kill a worker
             self.stats["images_rejected"] += 1
-            self.add_error(f"image {candidate.url}: {error}")
+            self.autopilot.record(
+                novelty=0.0,
+                domain=registrable_domain(candidate.url),
+                success=False,
+            )
+            self.add_error(f"media {candidate.url}: {error}")
 
-    def _host_lock(self, host: str) -> asyncio.Lock:
-        lock = self._host_locks.get(host)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._host_locks[host] = lock
-        return lock
+    async def media_once(self, *, block: bool = True) -> bool:
+        try:
+            item = await self.media_queue.get() if block else self.media_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            return False
+        try:
+            await self.handle_media_item(item)
+        finally:
+            self.media_queue.task_done()
+        return True
 
-    # -- seeding / restart --------------------------------------------------
     def restart_probability(self) -> float:
-        """Chance of a teleport this step. Rises with temperature so a hotter walk
-        jumps to fresh regions more often (PageRank-style damping / restart)."""
-        return min(1.0, self.profile.restart_probability * self.temperature)
+        base = max(0.0, self.profile.restart_probability)
+        return min(1.0, base * (0.2 + 3.0 * self.exploration))
 
     async def inject_seeds(self, count: int = 1) -> int:
-        """Pull fresh entry points from the seed sources into the frontier."""
+        if not self.seed_sources:
+            return 0
         injected = 0
-        for source in self.seed_sources:
+        attempts = 0
+        while injected < count and attempts < len(self.seed_sources):
+            source = self.seed_sources[self._seed_cursor % len(self.seed_sources)]
+            self._seed_cursor += 1
+            attempts += 1
             try:
-                for seed in await source.poll(count):
+                for seed in await source.poll(count - injected):
                     if self.add_seed(seed.url):
                         injected += 1
-            except Exception as error:  # noqa: BLE001 - a flaky source must not kill the loop
+            except Exception as error:
                 self.add_error(f"seed {getattr(source, 'name', source)}: {error}")
         return injected
 
-    # -- commons ------------------------------------------------------------
     async def process_next_commons_keyword(self) -> bool:
         if not self.pending_commons_keywords or self.image_source is None:
             return False
         keyword = self.pending_commons_keywords.popleft()
         self.pending_commons_keyword_set.discard(keyword)
-        self.add_event("commons_fetch", f"Searching Commons API: {keyword}")
         try:
             candidates = await self.image_source.fetch_candidates_async(keyword)
             self.stats["commons_api_queries"] += 1
             self.stats["image_candidates"] += len(candidates)
-            self.add_event(
-                "commons_results",
-                f"Commons API returned {len(candidates)} image candidate(s) for: {keyword}",
-            )
             for candidate in candidates:
-                await self.handle_image_candidate(candidate, keyword, page_score=1.0)
+                self.enqueue_media(candidate, keyword, 1.0)
         except Exception as error:
-            self.add_error(str(error))
+            self.add_error(f"Commons API: {error}")
         return True
 
-    # -- worker loop --------------------------------------------------------
-    async def crawl_once(self, worker_id: int) -> None:
-        # Self-driving temperature reacts to how novel recent finds have been.
-        if self.temperature_controller is not None:
-            self.temperature = self.temperature_controller.update(self.last_novelty)
+    async def crawl_once(self, worker_id: int, *, process_media_inline: bool = True) -> None:
+        self.exploration = self.autopilot.effective(self.stats["pages_visited"])
+        self.score_policy.exploration = self.exploration
+        self.score_policy.focus = 1.0 - self.exploration
+        self.temperature = self._temperature()
 
-        # Occasional teleport keeps the walk from ossifying and opens new regions.
-        if self.seed_sources and self.rng.random() < self.restart_probability():
-            await self.inject_seeds(1)
+        frontier_was_empty = len(self.frontier) == 0
+        seed_due = (
+            len(self.frontier) < self.profile.frontier_seed_threshold
+            or self.stats["pages_visited"] - self._last_seed_page_count >= self.profile.seed_interval_pages
+        )
+        teleport = self.autopilot.consume_teleport() or self.rng.random() < self.restart_probability()
+        if seed_due or teleport:
+            injected = await self.inject_seeds(1)
+            if injected:
+                self._last_seed_page_count = self.stats["pages_visited"]
+                if teleport:
+                    self.stats["teleports"] += 1
+                if frontier_was_empty:
+                    return
 
         item = self.frontier.sample(self.temperature, window=self.profile.selection_window)
         if item is None:
-            # Never idle when we can generate our own entry points.
-            if await self.inject_seeds(1):
-                return
-            if not await self.process_next_commons_keyword():
-                await asyncio.sleep(self.profile.empty_frontier_delay_seconds)
+            await asyncio.sleep(self.profile.empty_frontier_delay_seconds)
             return
         if not self.remember_page(item.url):
             return
-        host = host_of(item.url)
-        self.host_visits[host] = self.host_visits.get(host, 0) + 1
+        domain = registrable_domain(item.url)
+        self.host_visits[domain] = self.host_visits.get(domain, 0) + 1
 
         try:
-            self.add_event(
-                "page_fetch", f"Fetching page: {item.url}", depth=item.depth, score=round(item.score, 3)
-            )
-            async with self._host_lock(host):
-                resource = await self.page_world.fetch(item.url)
+            resource = await self.page_world.fetch(item.url)
             images, links, page_title = self.extractor.extract(resource)
             self.stats["pages_visited"] += 1
+            self.stats["link_candidates"] += len(links)
             self.stats["image_candidates"] += len(images)
+
+            # Traversal is admitted before media work, so a heavy page never stalls
+            # discovery of the next region.
+            for link in self._rank_links(links, item):
+                self.add_link(link.url, link.context, item, nofollow=link.nofollow)
+
+            ranked_images = sorted(
+                images,
+                key=lambda candidate: self.score_image(candidate, page_title, item.score),
+                reverse=True,
+            )
+            cap = self.profile.media_candidates_per_page
+            self.stats["media_page_cap_dropped"] += max(0, len(ranked_images) - cap)
+            enqueued = sum(
+                self.enqueue_media(candidate, page_title, item.score)
+                for candidate in ranked_images[:cap]
+            )
+            if process_media_inline:
+                for _ in range(enqueued):
+                    await self.media_once(block=False)
             self.add_event(
                 "page",
                 f"Crawled page: {resource.final_url}",
@@ -366,23 +503,24 @@ class CrawlEngine:
                 links=len(links),
                 worker=worker_id,
             )
-
-            ranked_images = sorted(
-                images,
-                key=lambda candidate: self.score_image(candidate, page_title, item.score),
-                reverse=True,
-            )
-            for candidate in ranked_images[:20]:
-                await self.handle_image_candidate(candidate, page_title, item.score)
-
-            for link in links[:100]:
-                self.add_link(link.url, link.context, item)
         except Exception as error:
             self.stats["pages_rejected"] += 1
+            self.autopilot.record(novelty=0.0, domain=domain, success=False)
             self.add_error(f"page {item.url}: {error}")
 
-        await asyncio.sleep(self.profile.worker_delay_seconds)
+    async def page_worker(self, worker_id: int) -> None:
+        while True:
+            await self.crawl_once(worker_id, process_media_inline=False)
 
     async def worker(self, worker_id: int) -> None:
+        await self.page_worker(worker_id)
+
+    async def media_worker(self, worker_id: int) -> None:
+        del worker_id
         while True:
-            await self.crawl_once(worker_id)
+            await self.media_once(block=True)
+
+    async def commons_worker(self) -> None:
+        while True:
+            if not await self.process_next_commons_keyword():
+                await asyncio.sleep(0.5)

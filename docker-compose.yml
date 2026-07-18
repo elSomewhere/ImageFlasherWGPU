@@ -1,42 +1,25 @@
-version: '3.8'
-
 services:
-  # Main application server
   imageflasher:
     build: .
     ports:
-      - "8000:8000"
-      - "5010:5010"
+      - "${WEB_PORT:-8000}:8000"
+      - "${WEBSOCKET_PORT:-5010}:5010"
     environment:
-      - NODE_ENV=production
-      - REDDIT_SUBREDDIT=${REDDIT_SUBREDDIT:-worldnews}
-      - WEB_PORT=8000
-      - WEBSOCKET_PORT=5010
-    volumes:
-      # Mount for persistent storage if needed
-      - ./data:/app/data
+      NODE_ENV: production
+      WEB_PORT: 8000
+      WEBSOCKET_PORT: 5010
+      CRAWLER_CONTROL_PORT: 5011
+      CRAWLER_IMAGE_HOST: 0.0.0.0
+      CRAWLER_CONTROL_HOST: 127.0.0.1
+      CRAWLER_EXPLORATION: ${CRAWLER_EXPLORATION:-0.55}
+      CRAWLER_CONTENT_POLICY: ${CRAWLER_CONTENT_POLICY:-broad}
+      CRAWLER_PAGE_DELAY: ${CRAWLER_PAGE_DELAY:-1.0}
+      CRAWLER_GLOBAL_CONCURRENCY: ${CRAWLER_GLOBAL_CONCURRENCY:-16}
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    depends_on:
-      - redis
 
-  # Redis for image caching and queue management
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
-
-  # Nginx reverse proxy for production
   nginx:
     image: nginx:alpine
+    profiles: ["proxy"]
     ports:
       - "80:80"
       - "443:443"
@@ -46,22 +29,3 @@ services:
     depends_on:
       - imageflasher
     restart: unless-stopped
-
-  # Optional: Monitoring with Prometheus (for production monitoring)
-  prometheus:
-    image: prom/prometheus:latest
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    profiles:
-      - monitoring
-
-volumes:
-  redis_data:
-
-# For development override
-# Usage: docker-compose -f docker-compose.yml -f docker-compose.dev.yml up
-networks:
-  default:
-    name: imageflasher-network

@@ -36,3 +36,33 @@ class NoveltyArchive:
 
     def __len__(self) -> int:
         return len(self._hashes)
+
+
+class VisualNoveltyArchive:
+    """Bounded dHash + color novelty used for actual image admission."""
+
+    def __init__(self, capacity: int = 4096) -> None:
+        self._features: deque[tuple[int, tuple[float, ...]]] = deque(maxlen=capacity)
+
+    def novelty(self, dhash: int, histogram: tuple[float, ...]) -> float:
+        if not self._features:
+            return 1.0
+        nearest = 1.0
+        for existing_hash, existing_histogram in self._features:
+            hash_distance = _hamming(dhash, existing_hash) / HASH_BITS
+            if histogram and existing_histogram:
+                histogram_distance = min(
+                    1.0,
+                    sum(abs(left - right) for left, right in zip(histogram, existing_histogram)) / 2.0,
+                )
+            else:
+                histogram_distance = 0.0
+            distance = 0.75 * hash_distance + 0.25 * histogram_distance
+            nearest = min(nearest, distance)
+        return nearest
+
+    def add(self, dhash: int, histogram: tuple[float, ...]) -> None:
+        self._features.append((dhash, histogram))
+
+    def __len__(self) -> int:
+        return len(self._features)

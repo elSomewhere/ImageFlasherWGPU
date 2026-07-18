@@ -2,7 +2,16 @@
 
 An interactive digital art piece that viscerally demonstrates **information overload** in our hyperconnected world. Using WebGPU for high-performance rendering, it creates an overwhelming stream of images that flash by faster than human comprehension—mirroring how we consume digital content in the internet age.
 
+The project now includes an autonomous, compliance-first web journey: it continuously
+traverses public links, collects and normalizes media into a bounded rolling buffer,
+and replays the evolving digital world through a GPU-resident image wall. It runs
+without configuration, while keywords, seed URLs, exploration, autopilot, and content
+policy remain steerable at runtime.
+
 > 📖 **[Read the full conceptual framework](CONCEPT.md)** to understand the artistic vision and cultural commentary behind this project.
+>
+> 🧭 **[Read the crawler architecture](CRAWLER_ARCHITECTURE.md)** for the traversal,
+> compliance, backpressure, protocol, renderer, and extension design.
 
 ![Demo](https://img.shields.io/badge/WebGPU-Powered-brightgreen) ![Platform](https://img.shields.io/badge/Platform-Web-blue) ![Language](https://img.shields.io/badge/Language-C%2B%2B%2FPython%2FNode.js-orange) ![Art](https://img.shields.io/badge/Purpose-Digital_Art-purple)
 
@@ -20,11 +29,11 @@ This project now features an **enhanced Ryoji Ikeda-inspired interface** with:
 
 ### Prerequisites
 
-1. **Node.js 16+** and **Python 3.7+**
-2. **Emscripten SDK** (for building from source)
-3. **Python packages**:
+1. **Node.js 18+** and **Python 3.11+**
+2. **A current Emscripten SDK** (the build downloads its official Dawn WebGPU port)
+3. **Python packages** (installed into a project-local virtual environment):
    ```bash
-   pip3 install -r requirements.txt
+   make setup-python
    ```
 
 ### Installation & Running
@@ -34,6 +43,7 @@ This project now features an **enhanced Ryoji Ikeda-inspired interface** with:
 git clone https://github.com/elSomewhere/ImageFlasherWGPU.git
 cd ImageFlasherWGPU
 npm install
+make setup-python
 
 # Build (if needed) and start
 npm run build  # Only needed if WASM files are missing
@@ -42,6 +52,7 @@ npm start      # Start the Ikeda interface (default)
 # Alternative modes
 npm run start:reddit     # Reddit image scraping
 npm run start:generated  # Generated VHS-style images
+npm run start:web-crawler # Autonomous broad-web journey
 ```
 
 ### Direct Node.js Usage
@@ -56,6 +67,10 @@ node server.js --reddit --subreddit cyberpunk
 
 # Generated images mode
 node server.js --generated
+
+# Autonomous crawler; seeds/keywords are optional
+node server.js --web-crawler
+node server.js --web-crawler --keywords brutalism,astronomy
 ```
 
 ## 🎮 Interface Usage
@@ -68,6 +83,8 @@ Open `http://localhost:8000` to access the **Data.Matrix** interface featuring:
 - **Mode Parameters**: Frequency, scan speed, matrix scale, pulse rate, etc.
 - **Live Analysis**: Real-time luminance, entropy, variance, edge density
 - **Motion Controls**: Scrolling speed and offset adjustments
+- **Crawler Steering**: Exploration/autopilot, keywords, seeds, content policy, live queue metrics
+- **Delivery Telemetry**: Received, decoded, GPU-uploaded, and presented artifact counts
 
 ### Keyboard Shortcuts (Exhibition Ready)
 
@@ -103,6 +120,8 @@ Open `http://localhost:8000` to access the **Data.Matrix** interface featuring:
 │   └── python/         # Python image servers
 │       ├── ImageCreator_Ikeda.py  # Ikeda data server
 │       ├── scraper_3.py           # Reddit scraper
+│       ├── web_crawler_server.py  # Autonomous crawler entry point
+│       └── crawler/               # Ports/adapters/core/runtime architecture
 
 ├── server.js           # Node.js server (main entry point)
 ├── package.json        # Node.js dependencies & scripts
@@ -129,10 +148,12 @@ npm run rebuild
 | `npm start` | Start Ikeda interface |
 | `npm run start:reddit` | Start with Reddit scraper |
 | `npm run start:generated` | Start with generated images |
+| `npm run start:web-crawler` | Start the autonomous crawler |
 | `npm run build` | Build WASM modules |
 | `npm run dev` | Development build & start |
 | `npm run clean` | Clean build artifacts |
 | `npm run rebuild` | Full rebuild cycle |
+| `npm test` | Run the crawler and protocol regression suite |
 
 ## 🎨 Visual Modes
 
@@ -159,6 +180,10 @@ npm run rebuild
 - **Image Processing**: Python WebSocket servers with real-time analysis
 - **Graphics**: C++ compiled to WebAssembly via Emscripten
 - **Data Pipeline**: Live statistical analysis with metadata streaming
+- **Crawler**: Async page/media workers, host-stratified frontier, novelty autopilot
+- **Compliance**: robots.txt, Crawl-delay, SSRF/redirect checks, bounded fetches, backoff
+- **Artifact Bus**: Versioned provenance frames, rolling broker, per-viewer GPU credits
+- **Renderer**: 256-layer texture-array ring and a single instanced tile draw
 
 ## 📊 Data Analysis Features
 
@@ -183,4 +208,4 @@ This project combines multiple technologies and is intended for educational and 
 
 ---
 
-**Experience the intersection of data, art, and technology. 🌆✨** 
+**Experience the intersection of data, art, and technology. 🌆✨**

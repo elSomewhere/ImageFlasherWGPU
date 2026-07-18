@@ -2,13 +2,13 @@
 # Comprehensive build and server management
 
 # Configuration
-BUILD_DIR = cmake-build-emscripten
+BUILD_DIR = .build/wasm
 WEB_PORT = 8000
 WEBSOCKET_PORT = 5010
 CRAWLER_CONTROL_PORT = 5011
 CRAWLER_IMAGE_HOST ?= 127.0.0.1
 CRAWLER_CONTROL_HOST ?= 127.0.0.1
-KEYWORDS ?= nature,architecture,landscape,painting,science,history,animals,cities
+KEYWORDS ?=
 SEEDS ?=
 
 # Colors for output
@@ -51,7 +51,7 @@ help:
 	@echo "$(GREEN)Crawler examples:$(NC)"
 	@echo "  make start-crawler"
 	@echo "  make start-crawler KEYWORDS=\"brutalism,concrete\" SEEDS=\"https://en.wikipedia.org/wiki/Brutalist_architecture\""
-	@echo "  make start-crawler KEYWORDS=\"\" SEEDS=\"\"  # start with no defaults"
+	@echo "  make start-crawler  # autonomous journey with no topic configuration"
 	@echo "  make start-crawler-remote KEYWORDS=\"cats\""
 
 # Python virtual environment setup

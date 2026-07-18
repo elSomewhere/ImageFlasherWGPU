@@ -191,18 +191,18 @@
   "devDependencies": {},
   "scripts": {
     "build": "npm run build:wasm",
-    "build:wasm": "emcmake cmake -B build -S . && emmake make -C build && npm run copy:assets",
-    "copy:assets": "cp build/index.js public/ && cp build/index.wasm public/ && cp src/assets/app.js public/",
+    "build:wasm": "emcmake cmake -S . -B .build/wasm && cmake --build .build/wasm --parallel",
+    "copy:assets": "cmake --build .build/wasm --target copy_assets",
     "start": "npm run start:ikeda",
     "start:ikeda": "node server.js --ikeda",
-    "start:reddit": "node server.js --reddit", 
+    "start:reddit": "node server.js --reddit",
     "start:generated": "node server.js --generated",
     "start:web-crawler": "node server.js --web-crawler",
     "dev": "npm run build && npm run start",
-    "clean": "rm -rf build/ && rm -f public/index.js public/index.wasm",
+    "clean": "cmake -E remove_directory .build/wasm && cmake -E rm -f public/index.js public/index.wasm",
     "stop": "pkill -f 'node server.js' || true",
     "rebuild": "npm run stop && npm run clean && npm run build && npm run start",
-    "test": "PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests"
+    "test": "PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m unittest discover -s tests"
   },
   "repository": {
     "type": "git",

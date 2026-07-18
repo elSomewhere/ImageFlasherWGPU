@@ -5,16 +5,17 @@ Generates images with embedded analytical data for visualization
 """
 
 import asyncio
-import websockets
+import argparse
 import io
-import json
-import struct
 import time
 import random
 import numpy as np
 import cv2
 from PIL import Image, ImageDraw, ImageFont
 import logging
+
+from crawler.adapters.sinks.websocket import ArtifactBroker
+from crawler.core.types import Artifact, RightsMetadata
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -261,78 +262,60 @@ class IkedaImageServer:
         if len(self.analysis_history) > 100:  # Keep last 100 analyses
             self.analysis_history.pop(0)
         
-        # Convert to bytes with embedded metadata
-        img_bytes = self.image_to_bytes_with_metadata(processed_img, analysis)
-        
-        return img_bytes
-    
-    def image_to_bytes_with_metadata(self, img, analysis):
-        """Convert image to bytes with embedded analysis data"""
-        
-        # Convert image to PNG bytes
         img_buffer = io.BytesIO()
-        img.save(img_buffer, format='PNG')
-        img_bytes = img_buffer.getvalue()
-        
-        # Create metadata packet
-        metadata = {
-            'analysis': analysis,
-            'mode': self.current_mode,
-            'threshold': self.threshold,
-            'image_size': len(img_bytes)
-        }
-        
-        metadata_json = json.dumps(metadata).encode('utf-8')
-        metadata_size = len(metadata_json)
-        
-        # Pack: [metadata_size(4 bytes)][metadata][image_data]
-        packed_data = struct.pack('<I', metadata_size) + metadata_json + img_bytes
-        
-        return packed_data
+        processed_img.save(img_buffer, format='PNG')
+        return Artifact(
+            kind="image",
+            payload=img_buffer.getvalue(),
+            width=processed_img.width,
+            height=processed_img.height,
+            mime="image/png",
+            producer="generated_ikeda",
+            score=1.0,
+            novelty=1.0,
+            rights=RightsMetadata(
+                status="known",
+                license="generated",
+                creator="ImageFlasherWGPU",
+                transformation="procedurally generated Ikeda visualization",
+            ),
+            metadata={
+                "analysis": analysis,
+                "mode": self.current_mode,
+                "threshold": self.threshold,
+            },
+        )
     
-    async def image_sender(self, websocket):
-        """Send Ikeda-processed images with data analysis"""
-        logger.info("Ikeda image server: Client connected")
-        
-        try:
-            frame_count = 0
-            start_time = time.time()
-            
-            while True:
-                # Generate and send image
-                img_data = self.generate_ikeda_image()
-                await websocket.send(img_data)
-                
-                frame_count += 1
-                
-                # Log performance metrics
-                if frame_count % 100 == 0:
-                    elapsed = time.time() - start_time
-                    fps = frame_count / elapsed
-                    logger.info(f"Sent {frame_count} frames, {fps:.1f} FPS avg")
-                    
-                    # Log current analysis
-                    if self.analysis_history:
-                        latest = self.analysis_history[-1]
-                        logger.info(f"Latest analysis - Luminance: {latest['mean_luminance']:.1f}, "
-                                  f"Entropy: {latest['entropy']:.2f}, "
-                                  f"Edge density: {latest['edge_density']:.3f}")
-                
-                await asyncio.sleep(SEND_DELAY)
-                
-        except websockets.ConnectionClosed:
-            logger.info("Ikeda image server: Client disconnected")
-        except Exception as e:
-            logger.error(f"Error in image_sender: {e}")
+    async def produce(self, broker: ArtifactBroker):
+        """Generate independently of viewers and publish to the shared ring."""
+        frame_count = 0
+        start_time = time.time()
+        while True:
+            await broker.emit(await asyncio.to_thread(self.generate_ikeda_image))
+            frame_count += 1
+            if frame_count % 100 == 0:
+                elapsed = time.time() - start_time
+                logger.info("Published %s generated artifacts, %.1f FPS avg", frame_count, frame_count / elapsed)
+            await asyncio.sleep(SEND_DELAY)
 
-async def main():
+async def main(host: str = WS_HOST, port: int = WS_PORT):
     server = IkedaImageServer()
+    broker = ArtifactBroker(host, port, capacity=256, client_queue_size=32)
     
-    logger.info(f"Starting Ikeda Image Server on ws://{WS_HOST}:{WS_PORT}")
+    logger.info("Starting Ikeda Image Server on ws://%s:%s", host, port)
     logger.info("Generating data-driven black & white visualizations")
     
-    async with websockets.serve(server.image_sender, WS_HOST, WS_PORT):
-        await asyncio.Future()  # Run forever
+    producer = asyncio.create_task(server.produce(broker))
+    async with broker.serve():
+        try:
+            await asyncio.Future()
+        finally:
+            producer.cancel()
+            await asyncio.gather(producer, return_exceptions=True)
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    parser = argparse.ArgumentParser(description="Procedural Ikeda artifact source")
+    parser.add_argument("--host", default=WS_HOST)
+    parser.add_argument("--port", type=int, default=WS_PORT)
+    args = parser.parse_args()
+    asyncio.run(main(args.host, args.port))

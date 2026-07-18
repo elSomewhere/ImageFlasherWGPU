@@ -4,92 +4,128 @@
 Module['onRuntimeInitialized'] = () => {
     console.log("WASM runtime initialized. Setting up restructured Ikeda control system...");
 
-    function getImageWebSocketUrl() {
+    let runtimeConfigPromise = null;
+
+    function getRuntimeConfig() {
+        if (!runtimeConfigPromise) {
+            runtimeConfigPromise = fetch('/api/runtime-config')
+                .then((response) => {
+                    if (!response.ok) throw new Error(`Runtime config: ${response.status}`);
+                    return response.json();
+                })
+                .catch((error) => {
+                    console.warn('Runtime configuration unavailable; using defaults', error);
+                    return { websocket_port: 5010, crawler_enabled: true };
+                });
+        }
+        return runtimeConfigPromise;
+    }
+
+    async function getImageWebSocketUrl() {
         const params = new URLSearchParams(window.location.search);
         const explicitUrl = params.get('imageWs');
         if (explicitUrl) return explicitUrl;
 
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const hostname = window.location.hostname || '127.0.0.1';
-        return `${protocol}//${hostname}:5010`;
+        const config = await getRuntimeConfig();
+        const port = Number(config.websocket_port) || 5010;
+        return `${protocol}//${hostname}:${port}`;
     }
 
     // ------------------------------------------------------------------------
     // 1) WebSocket Connection with Enhanced Data Handling
     // ------------------------------------------------------------------------
-    const ws = new WebSocket(getImageWebSocketUrl());
-    ws.binaryType = 'arraybuffer';
-
+    let ws = null;
+    let reconnectAttempt = 0;
+    let rendererError = false;
     let imageCounter = 0;
     let fpsCounter = 0;
     let lastFpsTime = Date.now();
     let frameCount = 0;
-
-    ws.onopen = () => {
-        console.log("WebSocket connected - Ikeda data stream active");
-        updateStatusBar("CONNECTED", "WHITE");
+    const deliveryCounters = {
+        received: 0,
+        decoded: 0,
+        gpu_uploaded: 0,
+        presented: 0,
+        rejected: 0,
+        skipped: 0
     };
 
-    ws.onerror = (err) => {
-        console.error("WebSocket error:", err);
-        updateStatusBar("CONNECTION ERROR", "RED");
+    function updateDeliveryCounter(stage) {
+        const id = {
+            received: 'receivedCounter',
+            decoded: 'decodedCounter',
+            gpu_uploaded: 'uploadedCounter',
+            presented: 'presentedCounter'
+        }[stage];
+        if (id) {
+            const element = document.getElementById(id);
+            if (element) element.textContent = deliveryCounters[stage];
+        }
+    }
+
+    function acknowledge(stage, sequence) {
+        deliveryCounters[stage]++;
+        updateDeliveryCounter(stage);
+        if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ack', stage, sequence, at_ms: Date.now() }));
+        }
+    }
+
+    Module['onRendererEvent'] = (stageCode, sequence) => {
+        const stage = {
+            1: 'decoded',
+            2: 'gpu_uploaded',
+            3: 'presented',
+            4: 'rejected'
+        }[stageCode];
+        if (stage) acknowledge(stage, sequence >>> 0);
     };
 
-    ws.onmessage = (event) => {
-        // Enhanced data handling with metadata support
-        let byteArray = new Uint8Array(event.data);
-        
-        // Check if this is a metadata-packed message
-        if (byteArray.length > 4) {
-            try {
-                // Try to read metadata size (first 4 bytes)
-                const metadataSize = new DataView(byteArray.buffer, 0, 4).getUint32(0, true);
-                
-                if (metadataSize > 0 && metadataSize < byteArray.length) {
-                    // Extract metadata
-                    const metadataBytes = byteArray.slice(4, 4 + metadataSize);
-                    const metadataStr = new TextDecoder().decode(metadataBytes);
-                    const metadata = JSON.parse(metadataStr);
-                    
-                    // Extract image data
-                    const imageData = byteArray.slice(4 + metadataSize);
-                    
-                    // Update data display with live analysis
-                    updateDataDisplay(metadata.analysis);
-                    
-                    // Forward image to C++
-                    let ptr = Module._malloc(imageData.length);
-                    Module.HEAPU8.set(imageData, ptr);
-                    Module.ccall('onImageReceived', null, ['number', 'number'], [ptr, imageData.length]);
-                    Module._free(ptr);
-                } else {
-                    // Regular image data without metadata
-                    let ptr = Module._malloc(byteArray.length);
-                    Module.HEAPU8.set(byteArray, ptr);
-                    Module.ccall('onImageReceived', null, ['number', 'number'], [ptr, byteArray.length]);
-                    Module._free(ptr);
-                }
-            } catch (e) {
-                // Fallback to regular image processing
-                let ptr = Module._malloc(byteArray.length);
-                Module.HEAPU8.set(byteArray, ptr);
-                Module.ccall('onImageReceived', null, ['number', 'number'], [ptr, byteArray.length]);
-                Module._free(ptr);
-            }
-        } else {
-            // Regular image data
-            let ptr = Module._malloc(byteArray.length);
-            Module.HEAPU8.set(byteArray, ptr);
-            Module.ccall('onImageReceived', null, ['number', 'number'], [ptr, byteArray.length]);
-            Module._free(ptr);
+    Module['onWebGPUError'] = (type, message) => {
+        rendererError = true;
+        console.error(`WebGPU error ${type}: ${message}`);
+        updateStatusBar('GPU ERROR', 'RED');
+    };
+
+    function handleArtifactFrame(data) {
+        const bytes = new Uint8Array(data);
+        if (bytes.length < 4) throw new Error('Artifact frame is too short');
+        const headerLength = new DataView(bytes.buffer, bytes.byteOffset, 4).getUint32(0, true);
+        if (headerLength <= 0 || headerLength > 65536 || 4 + headerLength > bytes.length) {
+            throw new Error('Invalid artifact header length');
+        }
+        const header = JSON.parse(new TextDecoder().decode(bytes.subarray(4, 4 + headerLength)));
+        if (header.protocol !== 1) throw new Error(`Unsupported artifact protocol ${header.protocol}`);
+        const payload = bytes.subarray(4 + headerLength);
+        if (header.byte_size !== payload.length) throw new Error('Artifact payload length mismatch');
+        acknowledge('received', header.sequence);
+        if (header.kind !== 'image') {
+            acknowledge('skipped', header.sequence);
+            return;
         }
 
-        // Update counters
+        const analysis = header.metadata && header.metadata.analysis;
+        updateDataDisplay(analysis);
+        const provenance = document.getElementById('artifactProvenance');
+        if (provenance) {
+            const rights = header.rights || {};
+            provenance.textContent = `#${header.sequence} ${header.producer} | ${header.source_url || 'generated'} | ${rights.license || rights.status || 'unknown rights'}`;
+        }
+        const ptr = Module._malloc(payload.length);
+        Module.HEAPU8.set(payload, ptr);
+        Module.ccall(
+            'onArtifactReceived',
+            null,
+            ['number', 'number', 'number'],
+            [ptr, payload.length, header.sequence >>> 0]
+        );
+        Module._free(ptr);
+
         imageCounter++;
         frameCount++;
         document.getElementById('imageCounter').textContent = imageCounter;
-        
-        // Calculate FPS
         const now = Date.now();
         if (now - lastFpsTime >= 1000) {
             fpsCounter = frameCount;
@@ -97,7 +133,38 @@ Module['onRuntimeInitialized'] = () => {
             lastFpsTime = now;
             document.getElementById('fpsCounter').textContent = fpsCounter;
         }
-    };
+    }
+
+    async function connectImageStream() {
+        updateStatusBar('CONNECTING...', 'YELLOW');
+        ws = new WebSocket(await getImageWebSocketUrl());
+        ws.binaryType = 'arraybuffer';
+        ws.onopen = () => {
+            reconnectAttempt = 0;
+            console.log('WebSocket connected - versioned artifact stream active');
+            updateStatusBar('CONNECTED', 'WHITE');
+        };
+        ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            updateStatusBar('CONNECTION ERROR', 'RED');
+        };
+        ws.onmessage = (event) => {
+            try {
+                handleArtifactFrame(event.data);
+            } catch (error) {
+                console.error('Rejected artifact frame:', error);
+                updateStatusBar('PROTOCOL ERROR', 'RED');
+            }
+        };
+        ws.onclose = () => {
+            updateStatusBar('RECONNECTING...', 'YELLOW');
+            const delay = Math.min(30000, 500 * (2 ** reconnectAttempt));
+            reconnectAttempt++;
+            setTimeout(() => void connectImageStream(), delay);
+        };
+    }
+
+    void connectImageStream();
 
     // ------------------------------------------------------------------------
     // 2) Enhanced C++ Function Wrappers - Restructured Pipeline
@@ -450,6 +517,7 @@ Module['onRuntimeInitialized'] = () => {
 
     function updateStatusBar(status, color) {
         const statusElement = document.getElementById('connectionStatus');
+        if (rendererError && status !== 'GPU ERROR') return;
         statusElement.textContent = status;
         statusElement.style.color = color || '#FFFFFF';
     }
@@ -485,7 +553,7 @@ Module['onRuntimeInitialized'] = () => {
         resetDefaults();
     });
 
-    setupCrawlerControls();
+    void setupCrawlerControls();
 
     // ------------------------------------------------------------------------
     // 7) Initialize System
@@ -526,11 +594,20 @@ Module['onRuntimeInitialized'] = () => {
     function renderCrawlerState(state) {
         const payload = state.state || state;
         const keywords = (payload.keywords || []).join(', ') || 'none';
-        const status = `keywords: ${keywords} | frontier: ${payload.frontier_size ?? '--'} | queue: ${payload.queue_size ?? '--'} | pages: ${payload.pages_visited ?? '--'} | candidates: ${payload.image_candidates ?? '--'} | images: ${payload.images_accepted ?? '--'}/${payload.images_rejected ?? '--'}`;
+        const broker = payload.broker || {};
+        const status = `keywords: ${keywords} | explore: ${(payload.exploration ?? 0).toFixed(2)}${payload.autopilot ? ' auto' : ''} | domains: ${payload.distinct_hosts ?? '--'} | frontier: ${payload.frontier_size ?? '--'} | media: ${payload.media_queue_size ?? '--'} | broker: ${broker.broker_resident ?? payload.queue_size ?? '--'}/${broker.broker_capacity ?? '--'} | pages: ${payload.pages_visited ?? '--'} | accepted: ${payload.images_accepted ?? '--'} | rejected: ${payload.images_rejected ?? '--'} | duplicate: ${payload.images_duplicate ?? '--'}`;
         const panel = document.getElementById('crawlerStatus');
         const label = document.getElementById('crawlerStatusLabel');
         if (panel) panel.textContent = status;
         if (label) label.textContent = `${payload.queue_size ?? 0}/${payload.images_accepted ?? 0}`;
+        const exploration = document.getElementById('crawlerExploration');
+        const explorationValue = document.getElementById('crawlerExplorationValue');
+        const autopilot = document.getElementById('crawlerAutopilot');
+        const contentPolicy = document.getElementById('crawlerContentPolicy');
+        if (exploration && document.activeElement !== exploration) exploration.value = payload.exploration ?? 0.55;
+        if (explorationValue) explorationValue.textContent = Number(payload.exploration ?? 0.55).toFixed(2);
+        if (autopilot) autopilot.checked = Boolean(payload.autopilot);
+        if (contentPolicy) contentPolicy.value = payload.content_policy ?? broker.content_policy ?? 'broad';
         renderCrawlerLog(payload.recent_events || [], payload.recent_errors || []);
     }
 
@@ -583,11 +660,29 @@ Module['onRuntimeInitialized'] = () => {
         }
     }
 
-    function setupCrawlerControls() {
+    async function setupCrawlerControls() {
         const keywordInput = document.getElementById('crawlerKeywords');
         const seedInput = document.getElementById('crawlerSeed');
         const keywordButton = document.getElementById('applyCrawlerKeywords');
         const seedButton = document.getElementById('addCrawlerSeed');
+        const exploration = document.getElementById('crawlerExploration');
+        const explorationValue = document.getElementById('crawlerExplorationValue');
+        const autopilot = document.getElementById('crawlerAutopilot');
+        const contentPolicy = document.getElementById('crawlerContentPolicy');
+        const runtimeConfig = await getRuntimeConfig();
+
+        if (!runtimeConfig.crawler_enabled) {
+            [keywordInput, seedInput, keywordButton, seedButton, exploration, autopilot, contentPolicy]
+                .filter(Boolean)
+                .forEach((control) => { control.disabled = true; });
+            const panel = document.getElementById('crawlerStatus');
+            const label = document.getElementById('crawlerStatusLabel');
+            const log = document.getElementById('crawlerLog');
+            if (panel) panel.textContent = `Crawler controls inactive in ${runtimeConfig.mode || 'this'} mode`;
+            if (label) label.textContent = 'inactive';
+            if (log) log.textContent = 'Start with --web-crawler to enable the autonomous journey.';
+            return;
+        }
 
         if (keywordButton && keywordInput) {
             keywordButton.addEventListener('click', async () => {
@@ -621,6 +716,48 @@ Module['onRuntimeInitialized'] = () => {
             });
         }
 
+        if (exploration) {
+            exploration.addEventListener('input', () => {
+                if (explorationValue) explorationValue.textContent = Number(exploration.value).toFixed(2);
+            });
+            exploration.addEventListener('change', async () => {
+                try {
+                    renderCrawlerState(await crawlerRequest('/api/crawler/exploration', {
+                        method: 'POST',
+                        body: JSON.stringify({ exploration: Number(exploration.value) })
+                    }));
+                } catch (error) {
+                    document.getElementById('crawlerStatus').textContent = `Crawler: ${error.message}`;
+                }
+            });
+        }
+
+        if (autopilot) {
+            autopilot.addEventListener('change', async () => {
+                try {
+                    renderCrawlerState(await crawlerRequest('/api/crawler/autopilot', {
+                        method: 'POST',
+                        body: JSON.stringify({ enabled: autopilot.checked })
+                    }));
+                } catch (error) {
+                    document.getElementById('crawlerStatus').textContent = `Crawler: ${error.message}`;
+                }
+            });
+        }
+
+        if (contentPolicy) {
+            contentPolicy.addEventListener('change', async () => {
+                try {
+                    renderCrawlerState(await crawlerRequest('/api/crawler/content-policy', {
+                        method: 'POST',
+                        body: JSON.stringify({ policy: contentPolicy.value })
+                    }));
+                } catch (error) {
+                    document.getElementById('crawlerStatus').textContent = `Crawler: ${error.message}`;
+                }
+            });
+        }
+
         refreshCrawlerState();
         setInterval(refreshCrawlerState, 3000);
     }
@@ -628,8 +765,9 @@ Module['onRuntimeInitialized'] = () => {
 
 // Enhanced error handling for WebAssembly initialization
 Module['onAbort'] = (what) => {
+    Module.runtimeAbortReason = String(what);
     console.error("WebAssembly module aborted:", what);
     document.getElementById('connectionStatus').textContent = "WASM ERROR";
 };
 
-console.log("Restructured Ikeda control system loading..."); 
+console.log("Restructured Ikeda control system loading...");

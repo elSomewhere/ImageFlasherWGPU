@@ -27,8 +27,7 @@ target_compile_options(index
         #        -g4
         -O0
         -gsource-map
-        -s
-        USE_BOOST_HEADERS=1
+        --use-port=emdawnwebgpu
         "SHELL:-s USE_PTHREADS=1"
         -pthread
 )
@@ -36,11 +35,14 @@ target_compile_options(index
 # Set linker flags for Emscripten
 target_link_options(index PRIVATE
 #        "SHELL:-s USE_GLFW=3"
-        "SHELL:-s USE_WEBGPU=1"
+        --use-port=emdawnwebgpu
 #        "SHELL:-s USE_WEBGL2=1"
         "SHELL:-s WASM=1"
         "SHELL:-s ALLOW_MEMORY_GROWTH=1"
-        "SHELL:-s NO_EXIT_RUNTIME=0"
+        # This is an everlasting installation with a persistent decode thread and
+        # animation loop. Running exit handlers after main returns destroys a still-
+        # joinable std::thread and aborts one WASM worker.
+        "SHELL:-s NO_EXIT_RUNTIME=1"
 
         "SHELL:-s ASSERTIONS=2"
         "SHELL:-s SAFE_HEAP=1"
@@ -52,7 +54,6 @@ target_link_options(index PRIVATE
         "SHELL:-s EXPORTED_RUNTIME_METHODS=['ccall','cwrap','stackAlloc','stackSave','stackRestore','HEAPU8']"
         "SHELL:-s EXPORTED_FUNCTIONS=['_malloc','_free','_main']"
 
-#        "SHELL:-s USE_BOOST_HEADERS=1"
         -pthread
         "SHELL:-s PTHREAD_POOL_SIZE=10"
         "SHELL:-s FULL_ES3=1"
@@ -66,8 +67,6 @@ configure_file(public/app.js public/app.js COPYONLY)
 
 # Conditionally set file system related flags
 set(USE_FILE_SYSTEM 1) # Set this to 1 to enable file-system
-
-target_link_options(index PRIVATE --no-heap-copy)
 
 # Custom target for building and copying assets to public directory
 add_custom_target(copy_assets ALL

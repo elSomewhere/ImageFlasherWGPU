@@ -8,9 +8,10 @@ from __future__ import annotations
 import heapq
 import itertools
 import random
+from collections import Counter, deque
 from dataclasses import dataclass, field
 
-from .scoring import host_of
+from .scoring import registrable_domain
 from .selection import boltzmann_choice
 
 
@@ -34,26 +35,47 @@ class _PrioritizedItem:
 
 
 class URLFrontier:
-    def __init__(self, max_size: int = 5000, rng: random.Random | None = None) -> None:
+    def __init__(self, max_size: int = 5000, rng: random.Random | None = None, max_per_domain: int = 200) -> None:
         self.max_size = max_size
         self._heap: list[_PrioritizedItem] = []
         self._queued: set[str] = set()
         self._sequence = itertools.count()
         self._rng = rng or random.Random()
+        self.max_per_domain = max_per_domain
+        self._domain_counts: Counter[str] = Counter()
+        self._recent_domains: deque[str] = deque(maxlen=2)
+
+    def _remove(self, prioritized: _PrioritizedItem) -> None:
+        self._heap.remove(prioritized)
+        heapq.heapify(self._heap)
+        self._queued.discard(prioritized.item.url)
+        domain = registrable_domain(prioritized.item.url)
+        self._domain_counts[domain] -= 1
+        if self._domain_counts[domain] <= 0:
+            self._domain_counts.pop(domain, None)
 
     def add(self, item: FrontierItem) -> bool:
         if item.url in self._queued:
             return False
+        domain = registrable_domain(item.url)
+        if self._domain_counts[domain] >= self.max_per_domain:
+            same_domain = [
+                queued for queued in self._heap
+                if registrable_domain(queued.item.url) == domain
+            ]
+            weakest_domain = max(same_domain, key=lambda queued: queued.priority)
+            if -weakest_domain.priority >= item.score:
+                return False
+            self._remove(weakest_domain)
         if len(self._heap) >= self.max_size:
             # Evict the weakest queued item rather than ossifying: an everlasting
             # crawl must keep admitting fresh discoveries once the frontier fills.
             weakest = max(self._heap, key=lambda prioritized: prioritized.priority)
             if -weakest.priority >= item.score:
                 return False  # nothing weaker than the newcomer; drop the newcomer
-            self._heap.remove(weakest)
-            heapq.heapify(self._heap)
-            self._queued.discard(weakest.item.url)
+            self._remove(weakest)
         self._queued.add(item.url)
+        self._domain_counts[domain] += 1
         heapq.heappush(
             self._heap,
             _PrioritizedItem(priority=-item.score, sequence=next(self._sequence), item=item),
@@ -77,6 +99,7 @@ class URLFrontier:
         heapq.heapify(rebuilt)
         self._heap = rebuilt
         self._queued = queued
+        self._domain_counts = Counter(registrable_domain(item.url) for item in self.items())
 
     def items(self) -> list[FrontierItem]:
         return [prioritized.item for prioritized in self._heap]
@@ -86,6 +109,10 @@ class URLFrontier:
             return None
         prioritized = heapq.heappop(self._heap)
         self._queued.discard(prioritized.item.url)
+        domain = registrable_domain(prioritized.item.url)
+        self._domain_counts[domain] -= 1
+        if self._domain_counts[domain] <= 0:
+            self._domain_counts.pop(domain, None)
         return prioritized.item
 
     def sample(self, temperature: float, window: int = 64) -> FrontierItem | None:
@@ -101,16 +128,21 @@ class URLFrontier:
         candidates = heapq.nsmallest(min(window, len(self._heap)), self._heap)
         best_per_host: dict[str, _PrioritizedItem] = {}
         for prioritized in candidates:
-            host = host_of(prioritized.item.url)
+            host = registrable_domain(prioritized.item.url)
             incumbent = best_per_host.get(host)
             if incumbent is None or prioritized.priority < incumbent.priority:
                 best_per_host[host] = prioritized
         representatives = list(best_per_host.values())
+        fresh = [
+            candidate for candidate in representatives
+            if registrable_domain(candidate.item.url) not in self._recent_domains
+        ]
+        if fresh:
+            representatives = fresh
         scores = [-prioritized.priority for prioritized in representatives]
         chosen = representatives[boltzmann_choice(scores, temperature, self._rng)]
-        self._heap.remove(chosen)
-        heapq.heapify(self._heap)
-        self._queued.discard(chosen.item.url)
+        self._remove(chosen)
+        self._recent_domains.append(registrable_domain(chosen.item.url))
         return chosen.item
 
     def __len__(self) -> int:

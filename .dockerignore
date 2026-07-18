@@ -1,0 +1,12 @@
+.git
+.build
+.venv
+build
+cmake-build-debug
+cmake-build-emscripten
+node_modules
+__pycache__
+*.pyc
+.idea
+data
+ssl

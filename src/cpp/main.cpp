@@ -15,11 +15,11 @@ main.cpp
 #include <memory>
 #include <cmath>       // for fmod, floor, etc.
 #include <algorithm>   // for std::swap
+#include <unordered_set>
 // #include <random>   // Removed std::shuffle usage to avoid the compile error
 
 #include <emscripten.h>
 #include <emscripten/html5.h> // For emscripten_request_animation_frame_loop
-#include <emscripten/html5_webgpu.h>
 
 #include <webgpu/webgpu_cpp.h>
 
@@ -33,12 +33,6 @@ main.cpp
 
 // Include Ikeda shaders
 #include "ikeda_shaders.cpp"
-
-// Error handler for WebGPU
-void HandleUncapturedError(WGPUErrorType type, const char* message, void* userdata) {
-    emscripten_log(EM_LOG_ERROR, "Uncaptured WebGPU Error (%d): %s",
-                   static_cast<int>(type), message);
-}
 
 // ==================== SHADERS ====================
 
@@ -70,6 +64,49 @@ fn vsMain(@builtin(vertex_index) vid : u32) -> VSOutput {
     var out : VSOutput;
     out.Position = vec4<f32>(positions[vid], 0.0, 1.0);
     out.uv = uvs[vid];
+    return out;
+}
+)";
+
+const char* tileVertexShaderWGSL = R"(
+struct TileBuffer {
+    gridSize : u32,
+    residentCount : u32,
+    pad0 : u32,
+    pad1 : u32,
+    layers : array<u32>,
+}
+
+@group(0) @binding(0) var<storage, read> tiles : TileBuffer;
+
+struct VSOutput {
+    @builtin(position) Position : vec4<f32>,
+    @location(0) uv : vec2<f32>,
+    @location(1) @interpolate(flat) layerIndex : i32,
+};
+
+@vertex
+fn vsTile(@builtin(vertex_index) vid : u32, @builtin(instance_index) instance : u32) -> VSOutput {
+    var positions = array<vec2<f32>,6>(
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0), vec2<f32>(1.0, 1.0),
+        vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, 1.0), vec2<f32>(-1.0, 1.0)
+    );
+    var uvs = array<vec2<f32>,6>(
+        vec2<f32>(0.0,1.0), vec2<f32>(1.0,1.0), vec2<f32>(1.0,0.0),
+        vec2<f32>(0.0,1.0), vec2<f32>(1.0,0.0), vec2<f32>(0.0,0.0)
+    );
+    let grid = max(tiles.gridSize, 1u);
+    let column = instance % grid;
+    let row = instance / grid;
+    let tileScale = 1.0 / f32(grid);
+    let center = vec2<f32>(
+        -1.0 + (f32(column) * 2.0 + 1.0) * tileScale,
+         1.0 - (f32(row) * 2.0 + 1.0) * tileScale
+    );
+    var out : VSOutput;
+    out.Position = vec4<f32>(center + positions[vid] * tileScale, 0.0, 1.0);
+    out.uv = uvs[vid];
+    out.layerIndex = i32(tiles.layers[instance]);
     return out;
 }
 )";
@@ -139,7 +176,8 @@ fn fsCopy(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 
 wgpu::Device device;
 wgpu::Queue queue;
-wgpu::SwapChain swapChain;
+wgpu::Instance instance = wgpuCreateInstance(nullptr);
+wgpu::Adapter adapter;
 wgpu::Surface surfaceGlobal;
 wgpu::TextureFormat swapChainFormat;
 
@@ -196,19 +234,32 @@ static float g_ikedaPulseRate = 2.0f;      // pulse rhythm rate
 
 // ========== Data Structures & decode queue ==========
 
+struct RawArtifact {
+    std::vector<uint8_t> bytes;
+    uint32_t sequence = 0;
+};
+
 struct ImageData {
     std::vector<uint8_t> pixels;
-    uint32_t width;
-    uint32_t height;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    uint32_t sequence = 0;
 };
 
 template<typename T>
 class ThreadSafeQueue {
 public:
-    void push(const T& value) {
+    explicit ThreadSafeQueue(size_t capacity) : capacity_(capacity) {}
+
+    void push(T value) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            queue_.push(value);
+            if (closed_) return;
+            if (queue_.size() >= capacity_) {
+                queue_.pop();
+                dropped_++;
+            }
+            queue_.push(std::move(value));
         }
         condition_.notify_one();
     }
@@ -223,29 +274,46 @@ public:
 
     bool popBlocking(T& value) {
         std::unique_lock<std::mutex> lock(mutex_);
-        condition_.wait(lock, [this]{return !queue_.empty();});
+        condition_.wait(lock, [this]{return closed_ || !queue_.empty();});
+        if (queue_.empty()) return false;
         value = std::move(queue_.front());
         queue_.pop();
         return true;
     }
 
+    void close() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            closed_ = true;
+        }
+        condition_.notify_all();
+    }
+
+    size_t dropped() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return dropped_;
+    }
+
 private:
+    size_t capacity_;
     mutable std::mutex mutex_;
     std::queue<T> queue_;
     std::condition_variable condition_;
+    bool closed_ = false;
+    size_t dropped_ = 0;
 };
 
-ThreadSafeQueue<std::vector<uint8_t>> rawDataQueue;
+ThreadSafeQueue<RawArtifact> rawDataQueue(32);
 
-bool decodeAndResizeImage(const uint8_t* data, int length, ImageData& imageOut) {
+bool decodeAndResizeImage(const uint8_t* data, int length, uint32_t sequence, ImageData& imageOut) {
     int x, y, n;
     unsigned char* img = stbi_load_from_memory((const unsigned char*)data, length, &x, &y, &n, 4);
     if (!img) {
         std::cerr << "Failed to decode image from memory\n";
         return false;
     }
-    const int desiredWidth  = 512;
-    const int desiredHeight = 512;
+    const int desiredWidth  = 384;
+    const int desiredHeight = 384;
     std::vector<unsigned char> resized(desiredWidth * desiredHeight * 4);
     int result = stbir_resize_uint8(
             img, x, y, 0,
@@ -258,6 +326,7 @@ bool decodeAndResizeImage(const uint8_t* data, int length, ImageData& imageOut) 
     }
     imageOut.width  = desiredWidth;
     imageOut.height = desiredHeight;
+    imageOut.sequence = sequence;
     imageOut.pixels = std::move(resized);
     return true;
 }
@@ -286,7 +355,6 @@ public:
     void pushImage(const ImageData& image);
     void update();
     void renderTiles(wgpu::RenderPassEncoder& pass, int tileFactor);
-    void swapBuffers();
 
     // pipeline layout
     wgpu::PipelineLayout getPipelineLayout() const { return pipelineLayout_; }
@@ -296,8 +364,7 @@ public:
 
     // stats
     int getBufferUsage() const {
-        int frontBuffer = bufferIndex_;
-        return imagesInBuffer_[frontBuffer];
+        return imagesInBuffer_;
     }
     int getRingBufferSize() const {
         return ringBufferSize_;
@@ -321,19 +388,19 @@ public:
     void setDeltaTime(float dt) { dt_ = dt; }
 
 private:
-    void uploadImage(const ImageData& image, int buffer);
+    void uploadImage(const ImageData& image);
+    uint32_t randomResidentSlot();
 
-    static const uint32_t maxLayersPerArray = 256;
+    static const uint32_t maxTiles = 65536;
 
     wgpu::Device device_;
     wgpu::Queue queue_;
     uint32_t ringBufferSize_;
 
-    uint32_t textureWidth_ = 512;
-    uint32_t textureHeight_ = 512;
-
-    uint32_t writeIndex_[2];
-    uint32_t imagesInBuffer_[2];
+    uint32_t textureWidth_ = 384;
+    uint32_t textureHeight_ = 384;
+    uint32_t writeIndex_ = 0;
+    uint32_t imagesInBuffer_ = 0;
 
     // the user-provided minimum time between switches
     float imageSwitchInterval_;
@@ -344,30 +411,28 @@ private:
     std::vector<float> tileTimers_;
 
     wgpu::Sampler sampler_;
-    std::array<wgpu::Buffer, 2> uniformBuffers_;
+    wgpu::Buffer tileStateBuffer_;
 
     wgpu::PipelineLayout pipelineLayout_;
     wgpu::BindGroupLayout bindGroupLayout_;
 
-    // ring buffer data
-    std::array<std::vector<wgpu::Texture>, 2> textureArrays_;
-    std::array<std::vector<wgpu::TextureView>, 2> textureViews_;
-    std::array<std::vector<wgpu::BindGroup>, 2> bindGroups_;
+    wgpu::Texture textureArray_;
+    wgpu::TextureView textureView_;
+    wgpu::BindGroup bindGroup_;
 
-    ThreadSafeQueue<ImageData> imageQueue_;
-    int bufferIndex_;
+    ThreadSafeQueue<ImageData> imageQueue_{32};
 
     int maxUploadsPerFrame_ = 0;
 
     // store the ring-buffer index for each tile
     std::vector<uint32_t> tileIndices_;
+    std::vector<uint32_t> tileStateData_;
+    std::vector<uint32_t> slotSequences_;
+    std::unordered_set<uint32_t> presentedSequences_;
 
     // user wants partial random updates
     float randomTileFraction_ = 0.5f;
 
-    // for legacy, not used much now
-    uint32_t displayIndex_[2];
-    std::chrono::steady_clock::time_point lastSwitchTime_[2];
 };
 
 ImageFlasher* imageFlasher = nullptr;
@@ -378,6 +443,7 @@ extern "C" {
 EMSCRIPTEN_KEEPALIVE
 void setTileFactor(int x) {
     if (x < 0) x = 0;
+    if (x > 8) x = 8;
     g_tileFactor = x;
     std::cout << "[INFO] setTileFactor => " << g_tileFactor << std::endl;
 }
@@ -395,15 +461,10 @@ ImageFlasher::ImageFlasher(wgpu::Device dev, uint32_t ringSize, float switchInte
         : device_(dev),
           queue_(dev.GetQueue()),
           ringBufferSize_(ringSize),
-          imageSwitchInterval_(switchInterval),
-          bufferIndex_(0)
+          imageSwitchInterval_(switchInterval)
 {
-    for (int b = 0; b < 2; ++b) {
-        writeIndex_[b]     = 0;
-        imagesInBuffer_[b] = 0;
-        displayIndex_[b]   = 0;
-        lastSwitchTime_[b] = std::chrono::steady_clock::now();
-    }
+    slotSequences_.resize(ringBufferSize_, 0);
+    tileStateData_.resize(4 + maxTiles, 0);
 
     // create sampler
     wgpu::SamplerDescriptor sd = {};
@@ -416,9 +477,10 @@ ImageFlasher::ImageFlasher(wgpu::Device dev, uint32_t ringSize, float switchInte
     // create a bind group layout
     wgpu::BindGroupLayoutEntry bgle[4] = {};  // Restore 4 bindings for Ikeda shader
     bgle[0].binding = 0;
-    bgle[0].visibility = wgpu::ShaderStage::Fragment;
-    bgle[0].buffer.type = wgpu::BufferBindingType::Uniform;
-    bgle[0].buffer.minBindingSize = 16;
+    bgle[0].visibility = wgpu::ShaderStage::Vertex;
+    bgle[0].buffer.type = wgpu::BufferBindingType::ReadOnlyStorage;
+    // Four u32 header fields plus at least one runtime-array element.
+    bgle[0].buffer.minBindingSize = 5 * sizeof(uint32_t);
 
     bgle[1].binding = 1;
     bgle[1].visibility = wgpu::ShaderStage::Fragment;
@@ -445,61 +507,40 @@ ImageFlasher::ImageFlasher(wgpu::Device dev, uint32_t ringSize, float switchInte
     pld.bindGroupLayouts     = &bindGroupLayout_;
     pipelineLayout_ = device_.CreatePipelineLayout(&pld);
 
-    // 2 uniform buffers (unused placeholder)
-    for (int b=0; b<2; b++){
-        wgpu::BufferDescriptor ubDesc = {};
-        ubDesc.size  = 16;
-        ubDesc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-        uniformBuffers_[b] = device_.CreateBuffer(&ubDesc);
-    }
+    wgpu::BufferDescriptor tileBufferDescriptor = {};
+    tileBufferDescriptor.size = tileStateData_.size() * sizeof(uint32_t);
+    tileBufferDescriptor.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
+    tileStateBuffer_ = device_.CreateBuffer(&tileBufferDescriptor);
 
-    // create ring buffer textures
-    uint32_t numTexArrays = (ringBufferSize_ + maxLayersPerArray - 1) / maxLayersPerArray;
-    for (int b=0; b<2; b++){
-        textureArrays_[b].resize(numTexArrays);
-        textureViews_[b].resize(numTexArrays);
-        bindGroups_[b].resize(numTexArrays);
+    wgpu::TextureDescriptor td = {};
+    td.size.width  = textureWidth_;
+    td.size.height = textureHeight_;
+    td.size.depthOrArrayLayers = ringBufferSize_;
+    td.format = wgpu::TextureFormat::RGBA8Unorm;
+    td.usage  = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst;
+    textureArray_ = device_.CreateTexture(&td);
 
-        for (uint32_t i=0; i<numTexArrays; i++){
-            uint32_t layers = maxLayersPerArray;
-            if (i == numTexArrays - 1){
-                uint32_t leftover = ringSize % maxLayersPerArray;
-                if (leftover != 0) {
-                    layers = leftover;
-                }
-            }
-            wgpu::TextureDescriptor td = {};
-            td.size.width  = textureWidth_;
-            td.size.height = textureHeight_;
-            td.size.depthOrArrayLayers = layers;
-            td.format = wgpu::TextureFormat::RGBA8Unorm;
-            td.usage  = wgpu::TextureUsage::TextureBinding | wgpu::TextureUsage::CopyDst;
-            wgpu::Texture texArray = device_.CreateTexture(&td);
-            textureArrays_[b][i] = texArray;
+    wgpu::TextureViewDescriptor tvd = {};
+    tvd.dimension = wgpu::TextureViewDimension::e2DArray;
+    tvd.arrayLayerCount = ringBufferSize_;
+    textureView_ = textureArray_.CreateView(&tvd);
 
-            wgpu::TextureViewDescriptor tvd = {};
-            tvd.dimension = wgpu::TextureViewDimension::e2DArray;
-            textureViews_[b][i] = texArray.CreateView(&tvd);
-
-            wgpu::BindGroupEntry e[4] = {};  // Restore 4 entries for Ikeda shader
-            e[0].binding = 0;
-            e[0].buffer  = uniformBuffers_[b];
-            e[0].size    = 16;
-            e[1].binding = 1;
-            e[1].textureView = textureViews_[b][i];
-            e[2].binding = 2;
-            e[2].sampler = sampler_;
-            e[3].binding = 3;
-            e[3].buffer  = ikedaUniformBuffer;
-            e[3].size    = 64; // IkedaModeParams struct size
-
-            wgpu::BindGroupDescriptor bgd = {};
-            bgd.layout     = bindGroupLayout_;
-            bgd.entryCount = 4;  // Restore 4 entries for Ikeda shader
-            bgd.entries    = e;
-            bindGroups_[b][i] = device_.CreateBindGroup(&bgd);
-        }
-    }
+    wgpu::BindGroupEntry e[4] = {};
+    e[0].binding = 0;
+    e[0].buffer = tileStateBuffer_;
+    e[0].size = tileBufferDescriptor.size;
+    e[1].binding = 1;
+    e[1].textureView = textureView_;
+    e[2].binding = 2;
+    e[2].sampler = sampler_;
+    e[3].binding = 3;
+    e[3].buffer = ikedaUniformBuffer;
+    e[3].size = 64;
+    wgpu::BindGroupDescriptor bgd = {};
+    bgd.layout = bindGroupLayout_;
+    bgd.entryCount = 4;
+    bgd.entries = e;
+    bindGroup_ = device_.CreateBindGroup(&bgd);
 }
 
 // destructor
@@ -512,23 +553,17 @@ void ImageFlasher::pushImage(const ImageData& image){
 }
 
 // uploads one image into ring buffer
-void ImageFlasher::uploadImage(const ImageData& image, int buffer){
-    if (imagesInBuffer_[buffer] == ringBufferSize_){
-        displayIndex_[buffer] = (displayIndex_[buffer] + 1) % ringBufferSize_;
-    } else {
-        imagesInBuffer_[buffer]++;
-    }
-    uint32_t idx = writeIndex_[buffer];
-    uint32_t arrIdx = idx / maxLayersPerArray;
-    uint32_t layer  = idx % maxLayersPerArray;
+void ImageFlasher::uploadImage(const ImageData& image){
+    uint32_t idx = writeIndex_;
+    if (imagesInBuffer_ < ringBufferSize_) imagesInBuffer_++;
 
-    wgpu::ImageCopyTexture dst = {};
-    dst.texture = textureArrays_[buffer][arrIdx];
+    wgpu::TexelCopyTextureInfo dst = {};
+    dst.texture = textureArray_;
     dst.mipLevel = 0;
-    dst.origin   = {0, 0, layer};
+    dst.origin   = {0, 0, idx};
     dst.aspect   = wgpu::TextureAspect::All;
 
-    wgpu::TextureDataLayout layout = {};
+    wgpu::TexelCopyBufferLayout layout = {};
     layout.offset       = 0;
     layout.bytesPerRow  = image.width * 4;
     layout.rowsPerImage = image.height;
@@ -539,15 +574,13 @@ void ImageFlasher::uploadImage(const ImageData& image, int buffer){
     extent.depthOrArrayLayers = 1;
 
     queue_.WriteTexture(&dst, image.pixels.data(), image.pixels.size(), &layout, &extent);
-
-    writeIndex_[buffer] = (writeIndex_[buffer] + 1) % ringBufferSize_;
+    slotSequences_[idx] = image.sequence;
+    writeIndex_ = (writeIndex_ + 1) % ringBufferSize_;
+    EM_ASM({ if (Module.onRendererEvent) Module.onRendererEvent(2, $0); }, image.sequence);
 }
 
-// check decode queue, possibly swap buffers
+// Upload a bounded number of decoded images into the single rolling ring.
 void ImageFlasher::update(){
-    int front = bufferIndex_;
-    int back  = 1 - front;
-
     int uploadCount = 0;
     while(true){
         if (maxUploadsPerFrame_ > 0 && uploadCount >= maxUploadsPerFrame_) {
@@ -557,23 +590,24 @@ void ImageFlasher::update(){
         if(!imageQueue_.tryPop(img)){
             break;
         }
-        uploadImage(img, back);
+        EM_ASM({ if (Module.onRendererEvent) Module.onRendererEvent(1, $0); }, img.sequence);
+        uploadImage(img);
         uploadCount++;
-    }
-
-    if (uploadCount>0){
-        swapBuffers();
-        front = bufferIndex_;
     }
 }
 
-// The main rendering logic that increments tiles based on their timers
+uint32_t ImageFlasher::randomResidentSlot() {
+    if (imagesInBuffer_ == 0) return 0;
+    myRandSeed = 1103515245u * myRandSeed + 12345u;
+    if ((myRandSeed & 3u) == 0u) {
+        return (writeIndex_ + ringBufferSize_ - 1) % ringBufferSize_;
+    }
+    return (myRandSeed >> 8u) % imagesInBuffer_;
+}
+
+// Update tile state once and render every tile with one instanced draw.
 void ImageFlasher::renderTiles(wgpu::RenderPassEncoder& pass, int tileFactor){
-    int front = bufferIndex_;
-    if (imagesInBuffer_[front] == 0) {
-        // no images
-        pass.SetBindGroup(0, bindGroups_[front][0]);
-        pass.Draw(6);
+    if (imagesInBuffer_ == 0) {
         return;
     }
 
@@ -582,7 +616,7 @@ void ImageFlasher::renderTiles(wgpu::RenderPassEncoder& pass, int tileFactor){
 
     // ensure tileIndices_ & tileTimers_ have correct size
     if ((int)tileIndices_.size() != totalTiles){
-        tileIndices_.resize(totalTiles, 0);
+        tileIndices_.resize(totalTiles, (writeIndex_ + ringBufferSize_ - 1) % ringBufferSize_);
         tileTimers_.resize(totalTiles, 0.0f);
         std::cout << "[INFO] tileIndices_ re-init to size " << totalTiles << "\n";
     }
@@ -613,67 +647,23 @@ void ImageFlasher::renderTiles(wgpu::RenderPassEncoder& pass, int tileFactor){
         // increment ring-buffer index for the first 'toSwitch' tiles, reset their timer
         for (int i = 0; i < toSwitch; i++){
             int tileId = candidates[i];
-            tileIndices_[tileId] = (tileIndices_[tileId] + 1) % imagesInBuffer_[front];
+            tileIndices_[tileId] = randomResidentSlot();
             tileTimers_[tileId]  = 0.0f; // reset timer
+            uint32_t sequence = slotSequences_[tileIndices_[tileId]];
+            if (sequence != 0 && presentedSequences_.insert(sequence).second) {
+                EM_ASM({ if (Module.onRendererEvent) Module.onRendererEvent(3, $0); }, sequence);
+            }
         }
     }
-
-    // now draw each tile
-    float tileW = float(g_canvasWidth) / float(gridSize);
-    float tileH = float(g_canvasHeight) / float(gridSize);
-
-    for (int i=0; i<totalTiles; i++){
-        uint32_t layerIdx  = tileIndices_[i];
-        uint32_t arrIndex  = layerIdx / maxLayersPerArray;
-        uint32_t layerInTex= layerIdx % maxLayersPerArray;
-
-        // ephemeral uniform buffer for this tile
-        struct Uniforms {
-            int32_t layerIndex;
-            int32_t pad[3];
-        } uniformsData = { (int32_t)layerInTex, {0,0,0} };
-
-        wgpu::BufferDescriptor bd = {};
-        bd.size  = sizeof(uniformsData);
-        bd.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-        wgpu::Buffer ephemeralUB = device_.CreateBuffer(&bd);
-
-        queue_.WriteBuffer(ephemeralUB, 0, &uniformsData, sizeof(uniformsData));
-
-        wgpu::BindGroupEntry e[4] = {};  // Restore 4 entries for Ikeda shader
-        e[0].binding     = 0;
-        e[0].buffer      = ephemeralUB;
-        e[0].size        = sizeof(uniformsData);
-        e[1].binding     = 1;
-        e[1].textureView = textureViews_[front][arrIndex];
-        e[2].binding     = 2;
-        e[2].sampler     = sampler_;
-        e[3].binding     = 3;
-        e[3].buffer      = ikedaUniformBuffer;
-        e[3].size        = 64; // IkedaModeParams struct size
-
-        wgpu::BindGroupDescriptor bgd = {};
-        bgd.layout     = bindGroupLayout_;
-        bgd.entryCount = 4;  // Restore 4 entries for Ikeda shader
-        bgd.entries    = e;
-        wgpu::BindGroup ephemeralBG = device_.CreateBindGroup(&bgd);
-
-        // viewport for tile i
-        float vx = (i % gridSize) * tileW;
-        float vy = (i / gridSize) * tileH;
-        pass.SetViewport(vx, vy, tileW, tileH, 0.0f, 1.0f);
-
-        pass.SetBindGroup(0, ephemeralBG);
-        pass.Draw(6);
-    }
-
-    // restore full viewport
-    pass.SetViewport(0, 0, float(g_canvasWidth), float(g_canvasHeight), 0.0f, 1.0f);
-}
-
-void ImageFlasher::swapBuffers(){
-    bufferIndex_ = 1 - bufferIndex_;
-    lastSwitchTime_[bufferIndex_] = std::chrono::steady_clock::now();
+    tileStateData_[0] = static_cast<uint32_t>(gridSize);
+    tileStateData_[1] = imagesInBuffer_;
+    for (int i = 0; i < totalTiles; ++i) tileStateData_[4 + i] = tileIndices_[i];
+    queue_.WriteBuffer(
+        tileStateBuffer_, 0, tileStateData_.data(),
+        static_cast<size_t>(4 + totalTiles) * sizeof(uint32_t)
+    );
+    pass.SetBindGroup(0, bindGroup_);
+    pass.Draw(6, static_cast<uint32_t>(totalTiles));
 }
 
 // ========== Forward declarations for pipeline creation ==========
@@ -711,25 +701,29 @@ void updateScrolling(double dt) {
 }
 
 
-extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
-    wgpu::SwapChainDescriptor scDesc = {};
-    scDesc.format      = wgpu::TextureFormat::BGRA8Unorm;
-    scDesc.usage       = wgpu::TextureUsage::RenderAttachment;
-    scDesc.presentMode = wgpu::PresentMode::Fifo;
-
+extern "C" void initializeSurfaceAndPipeline() {
     double cw, ch;
     emscripten_get_element_css_size("canvas", &cw, &ch);
-    g_canvasWidth  = (uint32_t)cw;
-    g_canvasHeight = (uint32_t)ch;
-    scDesc.width   = g_canvasWidth;
-    scDesc.height  = g_canvasHeight;
+    g_canvasWidth  = std::max<uint32_t>(1, static_cast<uint32_t>(cw));
+    g_canvasHeight = std::max<uint32_t>(1, static_cast<uint32_t>(ch));
 
-    swapChain = device.CreateSwapChain(surface, &scDesc);
-    if (!swapChain) {
-        std::cerr << "Failed to create swap chain.\n";
+    wgpu::SurfaceCapabilities capabilities{};
+    surfaceGlobal.GetCapabilities(adapter, &capabilities);
+    if (capabilities.formatCount == 0) {
+        std::cerr << "Surface reported no supported formats.\n";
         return;
     }
-    swapChainFormat = scDesc.format;
+    swapChainFormat = capabilities.formats[0];
+
+    wgpu::SurfaceConfiguration surfaceConfig{};
+    surfaceConfig.device = device;
+    surfaceConfig.format = swapChainFormat;
+    surfaceConfig.usage = wgpu::TextureUsage::RenderAttachment;
+    surfaceConfig.width = g_canvasWidth;
+    surfaceConfig.height = g_canvasHeight;
+    surfaceConfig.alphaMode = wgpu::CompositeAlphaMode::Auto;
+    surfaceConfig.presentMode = wgpu::PresentMode::Fifo;
+    surfaceGlobal.Configure(&surfaceConfig);
 
     // Create ikedaUniformBuffer before ImageFlasher constructor
     {
@@ -740,7 +734,7 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
     }
 
     // create the ImageFlasher
-    imageFlasher = new ImageFlasher(device, 1024, /*imageSwitchInterval=*/1.0f/3);
+    imageFlasher = new ImageFlasher(device, 256, /*imageSwitchInterval=*/1.0f/3);
 
     createPipelineImageFlasher();
     createPipelineFade();
@@ -783,7 +777,9 @@ extern "C" void initializeSwapChainAndPipeline(wgpu::Surface surface) {
         // scroll offset
         updateScrolling(dt);
 
-        wgpu::TextureView swapChainView = swapChain.GetCurrentTextureView();
+        wgpu::SurfaceTexture surfaceTexture{};
+        surfaceGlobal.GetCurrentTexture(&surfaceTexture);
+        wgpu::TextureView swapChainView = surfaceTexture.texture.CreateView();
         if (!swapChainView) return EM_TRUE;
 
         // update ring buffer from decode queue, etc
@@ -942,12 +938,17 @@ std::thread decodeWorkerThread;
 
 void decodeWorkerFunc() {
     while (decodeWorkerRunning) {
-        std::vector<uint8_t> rawData;
+        RawArtifact rawData;
         if (!rawDataQueue.popBlocking(rawData)) {
-            continue;
+            break;
         }
         ImageData imgData;
-        if (!decodeAndResizeImage(rawData.data(), (int)rawData.size(), imgData)) {
+        if (!decodeAndResizeImage(
+                rawData.bytes.data(),
+                static_cast<int>(rawData.bytes.size()),
+                rawData.sequence,
+                imgData)) {
+            EM_ASM({ if (Module.onRendererEvent) Module.onRendererEvent(4, $0); }, rawData.sequence);
             continue;
         }
         if (imageFlasher) {
@@ -1008,9 +1009,16 @@ void updateIkedaUniforms() {
 // EMSCRIPTEN exports
 extern "C" {
 EMSCRIPTEN_KEEPALIVE
+void onArtifactReceived(uint8_t* data, int length, uint32_t sequence) {
+    RawArtifact artifact;
+    artifact.bytes.assign(data, data + length);
+    artifact.sequence = sequence;
+    rawDataQueue.push(std::move(artifact));
+}
+
+EMSCRIPTEN_KEEPALIVE
 void onImageReceived(uint8_t* data, int length) {
-    std::vector<uint8_t> raw(data, data + length);
-    rawDataQueue.push(raw);
+    onArtifactReceived(data, length, 0);
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -1185,6 +1193,7 @@ float getImageVariance() {
 
 void cleanup() {
     decodeWorkerRunning = false;
+    rawDataQueue.close();
     if (decodeWorkerThread.joinable()) {
         decodeWorkerThread.join();
     }
@@ -1192,68 +1201,79 @@ void cleanup() {
     imageFlasher = nullptr;
 }
 
-// WebGPU device + adapter
-void onDeviceRequestEnded(WGPURequestDeviceStatus status, WGPUDevice cDevice,
-                          const char* message, void* userdata) {
-    if (status == WGPURequestDeviceStatus_Success) {
-        device = wgpu::Device::Acquire(cDevice);
-        queue  = device.GetQueue();
-        device.SetUncapturedErrorCallback(HandleUncapturedError, nullptr);
-
-        WGPUSurface surface = (WGPUSurface)userdata;
-        initializeSwapChainAndPipeline(wgpu::Surface::Acquire(surface));
-
-        decodeWorkerThread = std::thread(decodeWorkerFunc);
-    } else {
-        std::cerr << "Failed to create device: "
-                  << (message ? message : "Unknown error") << std::endl;
-    }
-}
-
-void onAdapterRequestEnded(WGPURequestAdapterStatus status, WGPUAdapter cAdapter,
-                           const char* message, void* userdata) {
-    if (status == WGPURequestAdapterStatus_Success) {
-        wgpu::Adapter adapter = wgpu::Adapter::Acquire(cAdapter);
-        wgpu::DeviceDescriptor deviceDesc = {};
-        deviceDesc.label = "My Device";
-        adapter.RequestDevice(&deviceDesc, onDeviceRequestEnded, userdata);
-    } else {
-        std::cerr << "Failed to get WebGPU adapter: "
-                  << (message ? message : "Unknown error") << std::endl;
-    }
-}
-
 int main() {
-    // Note: Emscripten WebGPU requires nullptr for wgpuCreateInstance
-    WGPUInstance instance = wgpuCreateInstance(nullptr);
+    wgpu::EmscriptenSurfaceSourceCanvasHTMLSelector canvasSource{};
+    canvasSource.selector = "#canvas";
 
-    WGPURequestAdapterOptions opts = {};
-    opts.powerPreference = WGPUPowerPreference_HighPerformance;
-
-    WGPUSurfaceDescriptorFromCanvasHTMLSelector canv = {};
-    canv.chain.sType = WGPUSType_SurfaceDescriptorFromCanvasHTMLSelector;
-    canv.selector     = "canvas";
-
-    WGPUSurfaceDescriptor surfDesc = {};
-    surfDesc.nextInChain = reinterpret_cast<const WGPUChainedStruct*>(&canv);
-
-    WGPUSurface surface = wgpuInstanceCreateSurface(instance, &surfDesc);
-    if (!surface) {
+    wgpu::SurfaceDescriptor surfaceDescriptor{};
+    surfaceDescriptor.nextInChain = &canvasSource;
+    surfaceGlobal = instance.CreateSurface(&surfaceDescriptor);
+    if (!surfaceGlobal) {
         std::cerr << "Failed to create surface.\n";
         return -1;
     }
-    surfaceGlobal = wgpu::Surface::Acquire(surface);
 
-    wgpuInstanceRequestAdapter(instance, &opts, onAdapterRequestEnded, surface);
+    wgpu::RequestAdapterOptions options{};
+    options.compatibleSurface = surfaceGlobal;
+    options.powerPreference = wgpu::PowerPreference::HighPerformance;
 
-    emscripten_exit_with_live_runtime();
+    instance.RequestAdapter(
+        &options,
+        wgpu::CallbackMode::AllowSpontaneous,
+        [](wgpu::RequestAdapterStatus status, wgpu::Adapter requestedAdapter,
+           wgpu::StringView message) {
+            if (status != wgpu::RequestAdapterStatus::Success) {
+                std::cerr << "Failed to get WebGPU adapter: ";
+                if (message.length) std::cerr.write(message.data, message.length);
+                std::cerr << std::endl;
+                return;
+            }
+
+            adapter = requestedAdapter;
+            wgpu::DeviceDescriptor deviceDescriptor{};
+            deviceDescriptor.label = "ImageFlasher renderer";
+            deviceDescriptor.SetUncapturedErrorCallback(
+                [](const wgpu::Device&, wgpu::ErrorType type, wgpu::StringView error) {
+                    std::string message(error.data ? error.data : "", error.length);
+                    std::cerr << "Uncaptured WebGPU error ("
+                              << static_cast<int>(type) << "): ";
+                    if (!message.empty()) std::cerr << message;
+                    std::cerr << std::endl;
+                    EM_ASM({
+                        if (Module.onWebGPUError) {
+                            Module.onWebGPUError($0, UTF8ToString($1));
+                        }
+                    }, static_cast<int>(type), message.c_str());
+                });
+
+            adapter.RequestDevice(
+                &deviceDescriptor,
+                wgpu::CallbackMode::AllowSpontaneous,
+                [](wgpu::RequestDeviceStatus deviceStatus, wgpu::Device requestedDevice,
+                   wgpu::StringView deviceMessage) {
+                    if (deviceStatus != wgpu::RequestDeviceStatus::Success) {
+                        std::cerr << "Failed to create WebGPU device: ";
+                        if (deviceMessage.length) {
+                            std::cerr.write(deviceMessage.data, deviceMessage.length);
+                        }
+                        std::cerr << std::endl;
+                        return;
+                    }
+
+                    device = requestedDevice;
+                    queue = device.GetQueue();
+                    initializeSurfaceAndPipeline();
+                    decodeWorkerThread = std::thread(decodeWorkerFunc);
+                });
+        });
+
     return 0;
 }
 
 // ========== Implementation of Pipeline Helpers ==========
 
 wgpu::ShaderModule createShaderModule(const char* code) {
-    wgpu::ShaderModuleWGSLDescriptor wgslDesc = {};
+    wgpu::ShaderSourceWGSL wgslDesc = {};
     wgslDesc.code = code;
 
     wgpu::ShaderModuleDescriptor desc = {};
@@ -1344,14 +1364,14 @@ void createPipelineCopy() {
 }
 
 void createPipelineImageFlasher() {
-    wgpu::ShaderModule vs = createShaderModule(vertexShaderWGSL);
+    wgpu::ShaderModule vs = createShaderModule(tileVertexShaderWGSL);
     wgpu::ShaderModule fs = createShaderModule(ikedaImageFlasherFragmentWGSL);
     wgpu::PipelineLayout layout = imageFlasher->getPipelineLayout();
 
     wgpu::RenderPipelineDescriptor desc = {};
     desc.layout              = layout;
     desc.vertex.module       = vs;
-    desc.vertex.entryPoint   = "vsMain";
+    desc.vertex.entryPoint   = "vsTile";
 
     wgpu::ColorTargetState colorTarget = {};
     colorTarget.format    = wgpu::TextureFormat::RGBA8Unorm;

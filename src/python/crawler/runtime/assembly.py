@@ -1,26 +1,28 @@
 """Layer 4 — the composition root.
 
-This is the ONLY place that knows how the layers stack. For the real web it wraps a
-raw HttpWorld in the compliance decorators, in the same order the original
-SafeFetcher applied them (SSRF first, then robots, then rate limit, then fetch). For
-an open/generative world it would swap the inner adapter and drop the wrappers — the
-engine it hands back is identical either way.
+This is the only place that knows how the runtime layers stack. Page, media, robots,
+and source requests share one SSRF-safe aiohttp transport and one origin scheduler;
+robots policy is applied before every page or media fetch. The engine remains
+independent of those concrete adapters.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 
 from ..adapters.compliance.backoff import BackoffOnStatus
-from ..adapters.compliance.ratelimit import HostRateLimiter, RateLimited
-from ..adapters.compliance.robots import RobotsGuard
-from ..adapters.compliance.ssrf import SsrfGuard
+from ..adapters.compliance.ratelimit import OriginScheduler
+from ..adapters.compliance.robots import RobotsPolicy
 from ..adapters.extractors.html import HtmlExtractor
-from ..adapters.http_world import HttpWorld
+from ..adapters.http_world import AioHttpTransport, HttpWorld
+from ..adapters.processors import ImageProcessor
 from ..adapters.seeds.commons import CommonsImageSource
 from ..adapters.seeds.wikipedia_random import WikipediaRandomSeedSource
+from ..adapters.seeds.wikidata import WikidataOfficialSeedSource
 from ..adapters.sinks.websocket import WebSocketImageSink
 from ..ports.world import World
+from ..ports.processor import ProcessorRegistry
 from .control import ControlPlane
 from .engine import CrawlEngine
 from .profile import Profile
@@ -29,63 +31,137 @@ from .profile import Profile
 logger = logging.getLogger(__name__)
 
 
-def build_real_web_worlds(profile: Profile) -> tuple[World, World]:
+@dataclass
+class RealWebBundle:
+    page_world: World
+    media_world: World
+    transport: AioHttpTransport
+    scheduler: OriginScheduler
+    robots: RobotsPolicy
+
+
+def build_real_web_bundle(profile: Profile) -> RealWebBundle:
     """Compose the page/media Worlds for the real internet.
 
-    Order (outer -> inner) reproduces SafeFetcher: SSRF validates the URL first,
-    robots gate next, then the per-host politeness delay, then the raw fetch. The
-    same shared limiter is used for pages and media so timing is global per host.
+    The transport validates DNS and connected peers against the SSRF policy. Robots
+    gates page and media requests, while the shared scheduler enforces global and
+    per-origin concurrency, crawl delay, and circuit breaking across both worlds.
     """
     t = profile.transport
-    crawl_delays: dict[str, float] = {}
-    limiter = HostRateLimiter(t.page_delay_seconds, crawl_delays)
-    http_page = HttpWorld(t.user_agent, t.request_timeout, t.max_page_bytes)
-    http_media = HttpWorld(t.user_agent, t.request_timeout, t.max_image_bytes)
-
     if not profile.compliance:
-        return http_page, http_media
+        raise ValueError("The real-web transport cannot run with compliance disabled")
 
-    # Backoff wraps the raw fetch (retries on 429/503); rate-limit, robots, and SSRF
-    # layer outward. RobotsGuard shares crawl_delays with the limiter.
-    page_world = SsrfGuard(
-        RobotsGuard(
-            RateLimited(BackoffOnStatus(http_page), limiter),
-            t.user_agent,
-            t.request_timeout,
-            crawl_delays=crawl_delays,
-        )
+    scheduler = OriginScheduler(
+        global_concurrency=t.global_concurrency,
+        per_origin_concurrency=t.per_origin_concurrency,
+        delay_seconds=t.page_delay_seconds,
+        failure_threshold=t.circuit_breaker_failures,
+        circuit_seconds=t.circuit_breaker_seconds,
     )
-    media_world = SsrfGuard(RateLimited(BackoffOnStatus(http_media), limiter))
-    return page_world, media_world
+    transport = AioHttpTransport(
+        t.user_agent,
+        connect_timeout=t.connect_timeout,
+        request_timeout=t.request_timeout,
+    )
+    robots_http = HttpWorld(
+        transport=transport,
+        scheduler=scheduler,
+        max_bytes=t.max_robots_bytes,
+        max_redirects=t.max_robots_redirects,
+    )
+    robots = RobotsPolicy(robots_http, t.user_agent, scheduler=scheduler)
+    page_http = HttpWorld(
+        transport=transport,
+        scheduler=scheduler,
+        before_request=robots.require_allowed,
+        max_bytes=t.max_page_bytes,
+        max_redirects=t.max_redirects,
+    )
+    media_http = HttpWorld(
+        transport=transport,
+        scheduler=scheduler,
+        before_request=robots.require_allowed,
+        max_bytes=t.max_image_bytes,
+        max_redirects=t.max_redirects,
+    )
+    return RealWebBundle(
+        page_world=BackoffOnStatus(page_http, max_retries=t.max_retries),
+        media_world=BackoffOnStatus(media_http, max_retries=t.max_retries),
+        transport=transport,
+        scheduler=scheduler,
+        robots=robots,
+    )
+
+
+def build_real_web_worlds(profile: Profile) -> tuple[World, World]:
+    bundle = build_real_web_bundle(profile)
+    return bundle.page_world, bundle.media_world
 
 
 class Assembly:
     def __init__(self, profile: Profile) -> None:
         self.profile = profile
-        page_world, media_world = build_real_web_worlds(profile)
+        self.web = build_real_web_bundle(profile)
         t = profile.transport
 
         self.sink = WebSocketImageSink(
-            profile.image_host, profile.image_port, profile.max_queue_size, profile.send_delay_seconds
+            profile.image_host,
+            profile.image_port,
+            profile.max_queue_size,
+            profile.send_delay_seconds,
+            client_queue_size=profile.client_queue_size,
+            client_inflight=profile.client_inflight,
+            content_policy=profile.content_policy,
         )
         seed_sources = []
         if profile.enable_wikipedia_seeds:
-            seed_sources.append(WikipediaRandomSeedSource(t.user_agent, t.request_timeout))
+            seed_sources.extend(
+                [
+                    WikipediaRandomSeedSource(
+                        t.user_agent, t.request_timeout, world=self.web.page_world
+                    ),
+                    WikidataOfficialSeedSource(self.web.page_world),
+                ]
+            )
         self.engine = CrawlEngine(
             profile,
-            page_world=page_world,
-            media_world=media_world,
+            page_world=self.web.page_world,
+            media_world=self.web.media_world,
             extractor=HtmlExtractor(),
             sink=self.sink,
-            image_source=CommonsImageSource(t.user_agent, t.request_timeout, t.commons_api_limit),
+            image_source=CommonsImageSource(
+                t.user_agent,
+                t.request_timeout,
+                t.commons_api_limit,
+                world=self.web.page_world,
+            ),
             seed_sources=seed_sources,
+            processors=ProcessorRegistry(
+                [
+                    ImageProcessor(
+                        size=profile.image_size,
+                        min_width=profile.min_image_width,
+                        min_height=profile.min_image_height,
+                        max_pixels=profile.max_image_pixels,
+                    )
+                ]
+            ),
+            scheduler=self.web.scheduler,
+            robots_policy=self.web.robots,
         )
         self.control = ControlPlane(self.engine, profile.control_host, profile.control_port)
 
     async def run(self) -> None:
         workers = [
-            asyncio.create_task(self.engine.worker(worker_id))
-            for worker_id in range(self.profile.crawler_workers)
+            *(
+                asyncio.create_task(self.engine.page_worker(worker_id))
+                for worker_id in range(self.profile.page_workers)
+            ),
+            *(
+                asyncio.create_task(self.engine.media_worker(worker_id))
+                for worker_id in range(self.profile.media_workers)
+            ),
+            asyncio.create_task(self.engine.commons_worker()),
         ]
         async with self.sink.serve(), self.control.serve():
             logger.info("Image WebSocket on ws://%s:%s", self.profile.image_host, self.profile.image_port)
@@ -98,3 +174,5 @@ class Assembly:
             finally:
                 for worker in workers:
                     worker.cancel()
+                await asyncio.gather(*workers, return_exceptions=True)
+                await self.web.transport.close()

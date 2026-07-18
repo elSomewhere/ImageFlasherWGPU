@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <link rel="icon" href="data:,">
   <meta charset="UTF-8">
   <title>Data.Matrix - Ikeda Information Overload</title>
   <style>
@@ -528,12 +529,29 @@
     <label>Seed URL:</label>
     <input class="crawler-input" id="crawlerSeed" type="url" placeholder="https://example.com">
   </div>
+  <div class="control-row">
+    <label>Exploration:</label>
+    <input type="range" id="crawlerExploration" min="0" max="1" step="0.01" value="0.55">
+    <span id="crawlerExplorationValue" class="value-display">0.55</span>
+  </div>
+  <div class="control-row">
+    <label>Autopilot:</label>
+    <input type="checkbox" id="crawlerAutopilot" checked>
+  </div>
+  <div class="control-row">
+    <label>Content:</label>
+    <select id="crawlerContentPolicy">
+      <option value="broad" selected>Broad web</option>
+      <option value="open-license">Open license</option>
+    </select>
+  </div>
   <div style="text-align: center;">
     <button id="applyCrawlerKeywords">Set Keywords</button>
     <button id="addCrawlerSeed">Add Seed</button>
   </div>
   <div id="crawlerStatus" class="crawler-status">Crawler: inactive</div>
   <div id="crawlerLog" class="crawler-log">Crawler log: waiting for state...</div>
+  <div id="artifactProvenance" class="crawler-log">Artifact provenance: waiting...</div>
 
   <!-- System Controls -->
   <div class="section-header">System</div>
@@ -622,6 +640,10 @@
   <span id="connectionStatus">CONNECTING...</span>
   <span style="margin-left: 20px;">FPS: <span id="fpsCounter">--</span></span>
   <span style="margin-left: 20px;">Images: <span id="imageCounter">0</span></span>
+  <span style="margin-left: 12px;">Rx:<span id="receivedCounter">0</span></span>
+  <span style="margin-left: 8px;">Dec:<span id="decodedCounter">0</span></span>
+  <span style="margin-left: 8px;">GPU:<span id="uploadedCounter">0</span></span>
+  <span style="margin-left: 8px;">Shown:<span id="presentedCounter">0</span></span>
   <span style="margin-left: 20px;">Pre: <span id="currentPreprocessing">BLACK/WHITE</span></span>
   <span style="margin-left: 15px;">Post: <span id="currentPostprocessing">DATA</span></span>
   <span style="margin-left: 15px;"><span id="bufferUsageLabel">Buffer: --</span></span>
@@ -711,4 +733,4 @@
 <script src="app.js"></script>
 
 </body>
-</html> 
+</html>

@@ -6,6 +6,22 @@ from typing import Any
 
 
 @dataclass
+class RightsMetadata:
+    """Reuse/provenance information carried with an artifact.
+
+    Broad-web mode deliberately permits ``status="unknown"`` for transient display,
+    while the open-license policy can reject those artifacts at the broker boundary.
+    """
+
+    status: str = "unknown"
+    license: str | None = None
+    license_url: str | None = None
+    creator: str | None = None
+    attribution_url: str | None = None
+    transformation: str = ""
+
+
+@dataclass
 class Artifact:
     """A piece of media harvested from the world, ready for the renderer.
 
@@ -20,6 +36,15 @@ class Artifact:
     source_url: str = ""
     page_url: str = ""
     score: float = 0.0
+    novelty: float = 1.0
+    mime: str = "application/octet-stream"
+    producer: str = "web_crawler"
+    session_id: str = ""
+    sequence: int = 0
+    acquired_at: str = ""
+    content_hash: str = ""
+    duration: float = 0.0
+    rights: RightsMetadata = field(default_factory=RightsMetadata)
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -33,6 +58,9 @@ class MediaCandidate:
     alt: str = ""
     context: str = ""
     score: float = 0.0
+    mime_hint: str = ""
+    rights: RightsMetadata = field(default_factory=RightsMetadata)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -42,6 +70,8 @@ class Link:
     url: str
     context: str = ""
     score: float = 0.0
+    relation: str = "content"
+    nofollow: bool = False
 
 
 @dataclass

@@ -39,10 +39,6 @@ struct IkedaModeParams {
 // ==================== ENHANCED IMAGE FLASHER SHADER ====================
 
 const char* ikedaImageFlasherFragmentWGSL = R"(
-struct Uniforms {
-    layerIndex : i32
-}
-
 struct IkedaModeParams {
     preprocessingMode : i32,
     postprocessingMode : i32,
@@ -64,7 +60,6 @@ struct IkedaModeParams {
     pulseRate : f32
 }
 
-@group(0) @binding(0) var<uniform> u : Uniforms;
 @group(0) @binding(1) var texArr : texture_2d_array<f32>;
 @group(0) @binding(2) var samp : sampler;
 @group(0) @binding(3) var<uniform> ikeda : IkedaModeParams;
@@ -76,8 +71,11 @@ fn luminance(color: vec3<f32>) -> f32 {
 
 // Restructured fragment function with preprocessing and postprocessing pipeline
 @fragment
-fn fsImage(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
-    var sampledColor = textureSample(texArr, samp, uv, u.layerIndex);
+fn fsImage(
+    @location(0) uv : vec2<f32>,
+    @location(1) @interpolate(flat) layerIndex : i32
+) -> @location(0) vec4<f32> {
+    var sampledColor = textureSample(texArr, samp, uv, layerIndex);
     
     // ========== PREPROCESSING STAGE ==========
     var processedColor = sampledColor;
@@ -115,7 +113,7 @@ fn fsImage(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
     if (ikeda.postprocessingMode == 1) {
         let pixelSize = 1.0 / ikeda.gridSize;
         let quantizedUV = floor(uv / pixelSize) * pixelSize + pixelSize * 0.5;
-        let quantizedColor = textureSample(texArr, samp, quantizedUV, u.layerIndex);
+        let quantizedColor = textureSample(texArr, samp, quantizedUV, layerIndex);
         
         if (ikeda.preprocessingMode == 1) {
             let quantLum = luminance(quantizedColor.rgb);
@@ -150,7 +148,7 @@ fn fsImage(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
         let scanlineCount = 48.0;
         let scanlineY = floor(uv.y * scanlineCount);
         let scanlineUV = vec2<f32>(uv.x, (scanlineY + 0.5) / scanlineCount);
-        let scanlineColor = textureSample(texArr, samp, scanlineUV, u.layerIndex);
+        let scanlineColor = textureSample(texArr, samp, scanlineUV, layerIndex);
         let scanLum = luminance(scanlineColor.rgb);
         
         // Binary pattern
@@ -530,4 +528,4 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE float getImageAverageLuminance();
     EMSCRIPTEN_KEEPALIVE float getImageEntropy();
     EMSCRIPTEN_KEEPALIVE float getImageVariance();
-} 
+}

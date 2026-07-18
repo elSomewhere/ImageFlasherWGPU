@@ -1,4 +1,5 @@
 attrs==23.2.0
+aiohttp>=3.12,<4
 beautifulsoup4==4.12.3
 certifi==2024.6.2
 cffi==1.16.0
@@ -13,6 +14,7 @@ Pillow==10.0.0
 pycparser==2.22
 PySocks==1.7.1
 python-dotenv==1.0.1
+publicsuffix2>=2.20191221
 requests==2.32.3
 selenium==4.21.0
 setuptools==70.0.0

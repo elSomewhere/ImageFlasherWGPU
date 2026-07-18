@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 
 import websockets
 from websockets import WebSocketServerProtocol
@@ -55,33 +56,54 @@ class ControlPlane:
             return {"ok": True, "added": added, "state": engine.state()}
         if command_type == "set_temperature":
             try:
-                engine.temperature = max(0.0, float(command.get("temperature")))
+                temperature = float(command.get("temperature"))
             except (TypeError, ValueError):
                 return {"ok": False, "error": "temperature must be a number >= 0"}
-            engine.add_event("temperature", f"Set temperature: {engine.temperature:.3f}")
-            return {"ok": True, "temperature": engine.temperature, "state": engine.state()}
-        if command_type == "set_temperature_mode":
-            from ..core.temperature import make_controller
-
-            mode = str(command.get("mode", "static"))
+            if not math.isfinite(temperature) or temperature < 0:
+                return {"ok": False, "error": "temperature must be a finite number >= 0"}
             profile = engine.profile
-            engine.temperature_controller = make_controller(
-                mode,
-                temperature=engine.temperature,
-                low=profile.temperature_min,
-                high=profile.temperature_max,
-                rng=engine.rng,
-            )
-            active = getattr(engine.temperature_controller, "mode", "static")
+            span = max(profile.temperature_max - profile.temperature_min, 1e-9)
+            exploration = (temperature - profile.temperature_min) / span
+            engine.set_exploration(exploration)
+            engine.add_event("exploration", f"Mapped legacy temperature to exploration: {engine.exploration:.3f}")
+            return {"ok": True, "temperature": engine.temperature, "exploration": engine.exploration, "state": engine.state()}
+        if command_type == "set_temperature_mode":
+            mode = str(command.get("mode", "static"))
+            engine.autopilot.enabled = mode.lower() in {"ou", "adaptive", "autopilot"}
+            active = "autopilot" if engine.autopilot.enabled else "static"
             engine.add_event("temperature_mode", f"Set temperature mode: {active}")
             return {"ok": True, "temperature_mode": active, "state": engine.state()}
         if command_type == "set_focus":
             try:
-                engine.score_policy.focus = min(1.0, max(0.0, float(command.get("focus"))))
+                focus = float(command.get("focus"))
             except (TypeError, ValueError):
                 return {"ok": False, "error": "focus must be a number in [0, 1]"}
-            engine.add_event("focus", f"Set focus: {engine.score_policy.focus:.3f}")
-            return {"ok": True, "focus": engine.score_policy.focus, "state": engine.state()}
+            if not math.isfinite(focus) or not 0.0 <= focus <= 1.0:
+                return {"ok": False, "error": "focus must be a finite number in [0, 1]"}
+            engine.set_exploration(1.0 - focus)
+            engine.add_event("focus", f"Mapped legacy focus to exploration: {engine.exploration:.3f}")
+            return {"ok": True, "focus": focus, "exploration": engine.exploration, "state": engine.state()}
+        if command_type == "set_exploration":
+            try:
+                requested = float(command.get("exploration"))
+            except (TypeError, ValueError):
+                return {"ok": False, "error": "exploration must be a number in [0, 1]"}
+            if not math.isfinite(requested) or not 0.0 <= requested <= 1.0:
+                return {"ok": False, "error": "exploration must be a finite number in [0, 1]"}
+            exploration = engine.set_exploration(requested)
+            engine.add_event("exploration", f"Set exploration: {exploration:.3f}")
+            return {"ok": True, "exploration": exploration, "state": engine.state()}
+        if command_type == "set_autopilot":
+            engine.autopilot.enabled = bool(command.get("enabled"))
+            return {"ok": True, "autopilot": engine.autopilot.enabled, "state": engine.state()}
+        if command_type == "set_content_policy":
+            policy = str(command.get("policy", "broad"))
+            if policy not in {"broad", "open-license"}:
+                return {"ok": False, "error": "policy must be broad or open-license"}
+            if not hasattr(engine.sink, "content_policy"):
+                return {"ok": False, "error": "active sink does not support content policies"}
+            engine.sink.content_policy = policy
+            return {"ok": True, "content_policy": policy, "state": engine.state()}
         if command_type == "get_state":
             return engine.state()
         return {"ok": False, "error": f"Unknown command type: {command_type}"}

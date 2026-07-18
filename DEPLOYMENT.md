@@ -1,355 +1,120 @@
-# ImageFlasherWGPU Production Deployment Guide
+# Installation deployment guide
 
-## Overview
+This project is optimized for a long-running exhibition machine. The crawler and
+artifact history are deliberately ephemeral: restarting creates a fresh journey and
+no harvested payloads are persisted.
 
-This guide covers deploying ImageFlasherWGPU in production with the Reddit crawler running server-side and multiple viewers accessing the stream simultaneously.
-
-## Architecture
-
-```
-Internet → Load Balancer → Web Server → Image Pipeline → Redis Cache
-                     ↓         ↓             ↓
-                 Static Files  WebSocket   Processed
-                              Streaming   Images
-```
-
-## Quick Start (Docker)
-
-### 1. Basic Docker Deployment
+## Build and run
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-username/ImageFlasherWGPU.git
-cd ImageFlasherWGPU
-
-# Copy and configure environment
-cp env.example .env
-# Edit .env with your settings
-
-# Build and start services
-docker-compose up -d
-
-# Check status
-docker-compose ps
-docker-compose logs -f imageflasher
+make setup-python
+npm install
+npm run build:wasm
+npm run start:web-crawler
 ```
 
-### 2. Production Deployment with Nginx
+The first WASM build downloads Emscripten's official Dawn WebGPU port. The generated
+`public/index.js` and `public/index.wasm` are checked into this project, so a machine
+that only runs the installation does not need to rebuild unless the C++ changes.
+
+Default listeners:
+
+| Service | Default | Purpose |
+|---|---:|---|
+| Node web UI | `0.0.0.0:8000` | Interface, health, and crawler HTTP controls |
+| Artifact WebSocket | `127.0.0.1:5010` | Versioned artifact stream |
+| Crawler control WebSocket | `127.0.0.1:5011` | Node-to-crawler steering/state |
+
+Open `http://localhost:8000`. The server sets the COOP/COEP headers required for
+threaded WebAssembly and exposes `/health` for supervision.
+
+## Environment
 
 ```bash
-# Start with nginx proxy
-docker-compose --profile production up -d
-
-# Monitor logs
-docker-compose logs -f
-```
-
-## Cloud Platform Deployments
-
-### Option A: DigitalOcean App Platform
-
-1. **Create App Platform project**
-2. **Connect your GitHub repository**
-3. **Configure build settings:**
-   ```yaml
-   name: imageflasher-wgpu
-   services:
-   - build_command: npm run build
-     environment_slug: node-js
-     github:
-       branch: main
-       deploy_on_push: true
-     http_port: 8000
-     instance_count: 1
-     instance_size_slug: basic-xxs
-     name: web
-     run_command: node server.js --reddit
-     source_dir: /
-   ```
-
-### Option B: AWS EC2 Deployment
-
-```bash
-# Launch EC2 instance (t3.small or larger)
-# Install Docker and Docker Compose
-sudo yum update -y
-sudo yum install -y docker
-sudo systemctl start docker
-sudo usermod -a -G docker ec2-user
-
-# Install Docker Compose
-sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
-
-# Deploy application
-git clone https://github.com/your-username/ImageFlasherWGPU.git
-cd ImageFlasherWGPU
-cp env.example .env
-# Configure .env file
-docker-compose up -d
-```
-
-### Option C: Railway Deployment
-
-1. **Connect GitHub repository to Railway**
-2. **Add environment variables:**
-   ```
-   NODE_ENV=production
-   REDDIT_SUBREDDIT=worldnews
-   WEB_PORT=8000
-   WEBSOCKET_PORT=5010
-   ```
-3. **Deploy automatically on push**
-
-## Environment Configuration
-
-### Critical Environment Variables
-
-```bash
-# Application
-NODE_ENV=production
 WEB_PORT=8000
 WEBSOCKET_PORT=5010
+CRAWLER_CONTROL_PORT=5011
 
-# Reddit Configuration
-REDDIT_SUBREDDIT=worldnews  # or cats, cyberpunk, art, etc.
-REDDIT_MAX_PAGES=5          # Increase for longer streams
-REDDIT_PAGE_DELAY=2.0       # Delay between page requests
-REDDIT_IMAGE_DELAY=1.0      # Delay between image downloads
+# Keep control local. Bind the artifact stream externally only when LAN viewers need it.
+CRAWLER_IMAGE_HOST=127.0.0.1
+CRAWLER_CONTROL_HOST=127.0.0.1
 
-# Performance Tuning
-MAX_QUEUE_SIZE=2000         # Larger queue for more viewers
-SEND_DELAY=0.3              # Faster image streaming
-MAX_CONCURRENT_DOWNLOADS=10 # More parallel downloads
+# Optional behavior/safety tuning
+CRAWLER_EXPLORATION=0.55
+CRAWLER_CONTENT_POLICY=broad
+CRAWLER_PAGE_DELAY=1.0
+CRAWLER_GLOBAL_CONCURRENCY=16
 ```
 
-## Scaling Configuration
+The browser discovers the configured artifact port from `/api/runtime-config`. It can
+also be overridden per viewer with `?imageWs=wss://installation.example/stream`.
 
-### For High Traffic (100+ concurrent viewers)
+## Exhibition service management
 
-1. **Horizontal Scaling:**
-   ```yaml
-   # docker-compose.override.yml
-   services:
-     imageflasher:
-       deploy:
-         replicas: 3
-       environment:
-         - REDIS_HOST=redis
-   ```
+Run the Node parent under launchd, systemd, Docker, or another supervisor that:
 
-2. **Load Balancer Configuration:**
-   ```nginx
-   upstream app_servers {
-       server imageflasher_1:8000;
-       server imageflasher_2:8000;
-       server imageflasher_3:8000;
-   }
-   ```
+- starts it from the repository root;
+- uses `node server.js --web-crawler`;
+- restarts only on unexpected exit, with a delay to avoid a crash loop;
+- sends SIGTERM for shutdown so the Python child is stopped;
+- captures stdout/stderr and rotates logs;
+- health-checks `GET /health`.
 
-3. **Redis Optimization:**
-   ```bash
-   # Increase Redis memory for image caching
-   docker-compose exec redis redis-cli CONFIG SET maxmemory 1gb
-   ```
+Do not run separate replicas against one browser stream without an explicit upstream
+broker. Each process is intentionally its own journey and has its own in-memory ring.
 
-## Performance Optimization
+## LAN and reverse proxy
 
-### 1. Image Pipeline Optimization
-
-```python
-# In scraper_3.py - production optimizations
-SCRAPED_IMAGES = deque(maxlen=2000)  # Larger buffer
-SEND_DELAY = 0.3  # Faster streaming
-MAX_CONCURRENT_DOWNLOADS = 10  # Parallel downloads
-```
-
-### 2. WebSocket Optimization
-
-```javascript
-// Add to server.js
-const WebSocket = require('ws');
-const wss = new WebSocket.Server({ 
-    port: 5010,
-    perMessageDeflate: true,  // Compression
-    maxPayload: 1024 * 1024   # 1MB max payload
-});
-```
-
-### 3. CDN Integration
-
-For global distribution, use CloudFlare or AWS CloudFront:
-
-```nginx
-# nginx.conf - add CDN headers
-location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|wasm)$ {
-    expires 1y;
-    add_header Cache-Control "public, immutable";
-    add_header CDN-Cache-Control "max-age=31536000";
-}
-```
-
-## Monitoring and Maintenance
-
-### 1. Health Checks
+For a trusted local network, bind the artifact socket on all interfaces:
 
 ```bash
-# Check application health
-curl http://localhost:8000/health
-
-# Check WebSocket connectivity
-wscat -c ws://localhost:5010
-
-# Monitor resource usage
-docker stats
+CRAWLER_IMAGE_HOST=0.0.0.0 node server.js --web-crawler
 ```
 
-### 2. Log Management
+Keep port 5011 private. If the UI is served over HTTPS, the browser requires a secure
+`wss://` artifact endpoint. Terminate TLS in the reverse proxy, forward that endpoint
+to `127.0.0.1:5010`, and provide its URL through the `imageWs` query parameter (or
+adapt `/api/runtime-config` for the deployment). Preserve WebSocket upgrade headers.
+
+The proxy must retain these response headers on HTML, JavaScript, and WASM:
+
+```text
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+## Operational checks
+
+Before opening the installation:
 
 ```bash
-# View logs
-docker-compose logs -f imageflasher
-
-# Log rotation (add to docker-compose.yml)
-logging:
-  driver: "json-file"
-  options:
-    max-size: "10m"
-    max-file: "3"
+npm test
+npm run build:wasm
+curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/api/crawler/state
 ```
 
-### 3. Backup Strategy
+In the UI, verify:
 
-```bash
-# Backup configuration
-tar -czf backup-$(date +%Y%m%d).tar.gz \
-    docker-compose.yml nginx.conf .env
+- connection status is `CONNECTED`, not `GPU ERROR` or `WASM ERROR`;
+- received, decoded, uploaded, and presented counts continue increasing;
+- the uploaded count trails received by no more than the normal 16-frame credit window;
+- the crawler log changes domains over time and the frontier/media queues remain bounded;
+- WebGPU is enabled in the exhibition browser.
 
-# Database backup (if using persistent Redis)
-docker-compose exec redis redis-cli BGSAVE
-```
+The state endpoint reports open origin circuits, robots cache state, rejections,
+duplicates, queue occupancy, client drops, and delivery acknowledgements. Alert on a
+counter that stops moving, persistent open circuits across many origins, or a growing
+gap between delivery stages.
 
-## Security Considerations
+## Data and compliance
 
-### 1. Reddit API Rate Limiting
+- No crawler database or harvested media directory is created.
+- The broker, dedup archives, frontier, seen sets, and event logs are bounded memory.
+- The real-web entry point cannot disable robots/SSRF/politeness layers.
+- Replace the default User-Agent project URL with a stable operator/contact page.
+- Review the content policy, local law, venue requirements, and expected audience
+  before a public deployment. `open-license` is a metadata gate, not legal advice.
 
-```python
-# Implement exponential backoff in scraper_3.py
-import time
-import random
-
-def safe_request(url, max_retries=3):
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(url)
-            if response.status_code == 429:  # Rate limited
-                wait_time = (2 ** attempt) + random.uniform(0, 1)
-                time.sleep(wait_time)
-                continue
-            return response
-        except Exception as e:
-            if attempt == max_retries - 1:
-                raise e
-            time.sleep(2 ** attempt)
-```
-
-### 2. Resource Limits
-
-```yaml
-# docker-compose.yml - add resource limits
-services:
-  imageflasher:
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-          cpus: '0.5'
-```
-
-### 3. HTTPS Configuration
-
-```bash
-# Get Let's Encrypt certificate
-certbot --nginx -d your-domain.com
-
-# Update nginx.conf with SSL settings
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **WebGPU not working:**
-   - Ensure CORS headers are properly set
-   - Check browser WebGPU support
-   - Verify HTTPS in production
-
-2. **WebSocket connection failed:**
-   - Check firewall settings for port 5010
-   - Verify proxy configuration
-   - Test direct WebSocket connection
-
-3. **Reddit scraping blocked:**
-   - Reduce scraping rate
-   - Use different subreddit
-   - Implement IP rotation
-
-4. **High memory usage:**
-   - Reduce MAX_QUEUE_SIZE
-   - Implement image compression
-   - Add Redis memory limits
-
-### Debug Commands
-
-```bash
-# Test image pipeline
-docker-compose exec imageflasher python3 src/python/scraper_3.py
-
-# Test WebSocket
-wscat -c ws://localhost:5010
-
-# Check resource usage
-docker-compose exec imageflasher top
-docker-compose exec redis redis-cli INFO memory
-```
-
-## Cost Estimation
-
-### Monthly Costs (USD)
-
-| Platform | Small (10 users) | Medium (100 users) | Large (1000+ users) |
-|----------|------------------|-------------------|---------------------|
-| DigitalOcean | $25 | $50 | $200+ |
-| AWS EC2 | $20 | $80 | $300+ |
-| Railway | $15 | $40 | $150+ |
-
-### Optimization Tips
-
-1. **Use image compression** to reduce bandwidth costs
-2. **Implement CDN** for static assets
-3. **Cache processed images** in Redis
-4. **Scale horizontally** instead of vertically when possible
-
-## Production Checklist
-
-- [ ] Environment variables configured
-- [ ] SSL certificate installed
-- [ ] Health checks implemented
-- [ ] Log rotation configured
-- [ ] Monitoring setup
-- [ ] Backup strategy in place
-- [ ] Resource limits set
-- [ ] Rate limiting configured
-- [ ] CORS headers properly set
-- [ ] WebSocket proxy working
-- [ ] Redis persistence configured
-- [ ] Error handling implemented
-
-## Support
-
-For deployment issues:
-1. Check the application logs
-2. Verify all dependencies are installed
-3. Test individual components separately
-4. Review the troubleshooting section
-5. Create an issue on GitHub with logs and configuration
+See [CRAWLER_ARCHITECTURE.md](CRAWLER_ARCHITECTURE.md) for detailed invariants and
+extension points.

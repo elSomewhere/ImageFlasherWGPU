@@ -7,9 +7,8 @@ from __future__ import annotations
 
 from html.parser import HTMLParser
 from typing import Iterable
-from urllib.parse import urldefrag, urljoin
-
 from ...core.types import Link, MediaCandidate
+from ...core.url_policy import canonicalize_url
 from ...ports.world import FetchError, Resource
 
 
@@ -17,11 +16,7 @@ IMAGE_ATTRS = ("src", "data-src", "data-original", "data-lazy-src", "data-url")
 
 
 def normalize_url(url: str, base_url: str = "") -> str:
-    if not url:
-        return ""
-    absolute = urljoin(base_url, url.strip())
-    normalized, _fragment = urldefrag(absolute)
-    return normalized
+    return canonicalize_url(url, base_url)
 
 
 def parse_srcset(srcset: str) -> Iterable[str]:
@@ -29,6 +24,30 @@ def parse_srcset(srcset: str) -> Iterable[str]:
         parts = candidate.strip().split()
         if parts:
             yield parts[0]
+
+
+def select_srcset(srcset: str, target_width: int = 384) -> str:
+    parsed: list[tuple[str, float]] = []
+    for raw in srcset.split(","):
+        parts = raw.strip().split()
+        if not parts:
+            continue
+        score = float(target_width)
+        if len(parts) > 1:
+            descriptor = parts[1].lower()
+            try:
+                if descriptor.endswith("w"):
+                    score = float(descriptor[:-1])
+                elif descriptor.endswith("x"):
+                    score = float(descriptor[:-1]) * target_width
+            except ValueError:
+                pass
+        parsed.append((parts[0], score))
+    if not parsed:
+        return ""
+    # Prefer the smallest rendition that meets the target, otherwise the largest.
+    large_enough = [candidate for candidate in parsed if candidate[1] >= target_width]
+    return min(large_enough, key=lambda candidate: candidate[1])[0] if large_enough else max(parsed, key=lambda candidate: candidate[1])[0]
 
 
 class _DiscoveryParser(HTMLParser):
@@ -54,6 +73,26 @@ class _DiscoveryParser(HTMLParser):
             self._in_title = True
             return
 
+        if tag == "base" and attr_map.get("href"):
+            base = normalize_url(attr_map["href"], self.page_url)
+            if base:
+                self.page_url = base
+            return
+
+        if tag == "link" and attr_map.get("href"):
+            relations = {part.lower() for part in attr_map.get("rel", "").split()}
+            url = normalize_url(attr_map["href"], self.page_url)
+            mime = attr_map.get("type", "").lower()
+            if url and ("canonical" in relations or mime in {"application/rss+xml", "application/atom+xml"}):
+                self.links.append(
+                    Link(
+                        url=url,
+                        context=self.title,
+                        relation="canonical" if "canonical" in relations else "feed",
+                    )
+                )
+            return
+
         if tag == "meta":
             property_name = (attr_map.get("property") or attr_map.get("name") or "").lower()
             if property_name == "robots":
@@ -72,7 +111,9 @@ class _DiscoveryParser(HTMLParser):
                     urls.append(value)
             srcset = attr_map.get("srcset") or attr_map.get("data-srcset")
             if srcset:
-                urls.extend(parse_srcset(srcset))
+                selected = select_srcset(srcset)
+                if selected:
+                    urls.append(selected)
 
             context = " ".join(
                 value
@@ -99,7 +140,12 @@ class _DiscoveryParser(HTMLParser):
 
         if tag == "a" and attr_map.get("href"):
             url = normalize_url(attr_map["href"], self.page_url)
-            self._current_anchor = {"url": url, "text": ""}
+            relations = {part.lower() for part in attr_map.get("rel", "").split()}
+            self._current_anchor = {
+                "url": url,
+                "text": "",
+                "nofollow": "nofollow" in relations,
+            }
 
     def handle_data(self, data: str) -> None:
         if self._in_title:
@@ -118,6 +164,7 @@ class _DiscoveryParser(HTMLParser):
                     Link(
                         url=url,
                         context=f"{self.title} {self._current_anchor['text'].strip()[:300]}",
+                        nofollow=bool(self._current_anchor.get("nofollow")),
                     )
                 )
             self._current_anchor = None

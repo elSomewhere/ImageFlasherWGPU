@@ -11,6 +11,8 @@ import ipaddress
 import socket
 from urllib.parse import urlparse
 
+import aiohttp
+
 from ...ports.world import FetchError, Resource, World
 
 
@@ -47,3 +49,46 @@ class SsrfGuard:
         if resource.final_url != url:
             await asyncio.to_thread(self._validate, resource.final_url)
         return resource
+
+
+def is_public_ip(value: str) -> bool:
+    ip = ipaddress.ip_address(value.split("%", 1)[0])
+    return not (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    )
+
+
+def validate_url_literal(url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        raise FetchError(f"Unsupported URL scheme: {parsed.scheme}")
+    if not parsed.hostname or parsed.username or parsed.password:
+        raise FetchError("URL must contain a public hostname and no credentials")
+    try:
+        ipaddress.ip_address(parsed.hostname)
+    except ValueError:
+        return
+    if not is_public_ip(parsed.hostname):
+        raise FetchError(f"Blocked non-public address for {parsed.hostname}")
+
+
+class SafeResolver(aiohttp.abc.AbstractResolver):
+    """aiohttp resolver that never returns a non-public address."""
+
+    def __init__(self) -> None:
+        self._delegate = aiohttp.resolver.DefaultResolver()
+
+    async def resolve(self, host: str, port: int = 0, family: int = socket.AF_UNSPEC):
+        results = await self._delegate.resolve(host, port, family)
+        public = [result for result in results if is_public_ip(result["host"])]
+        if not public or len(public) != len(results):
+            raise OSError(f"Blocked non-public DNS result for {host}")
+        return public
+
+    async def close(self) -> None:
+        await self._delegate.close()

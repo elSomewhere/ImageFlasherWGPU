@@ -1,2 +1,6 @@
 ./cmake-build-emscripten
 ./cmake-build-debug
+.build/
+.venv/
+__pycache__/
+*.py[cod]
