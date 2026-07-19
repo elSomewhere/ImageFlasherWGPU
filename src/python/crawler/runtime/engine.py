@@ -16,6 +16,7 @@ from urllib.parse import urlsplit, urlunsplit
 from ..core.exploration import ExplorationAutopilot
 from ..core.frontier import FrontierItem, URLFrontier
 from ..core.scoring import ScorePolicy, registrable_domain
+from ..core.seen import BoundedLRUMap, RotatingBloomSet
 from ..core.signals.novelty import VisualNoveltyArchive
 from ..core.steering import TopicState
 from ..core.types import Link, MediaCandidate
@@ -116,7 +117,9 @@ class CrawlEngine:
         self.exploration = profile.exploration
         self.temperature = self._temperature()
         self.temperature_controller = None  # legacy state field
-        self.host_visits: dict[str, int] = {}
+        # Bounded so an endless walk does not accumulate one entry per domain forever;
+        # losing a stale host's freshness count is semantically fine.
+        self.host_visits: dict[str, int] = BoundedLRUMap(50_000)
         self.score_policy = ScorePolicy(
             self.topic_state,
             self.rng,
@@ -127,8 +130,12 @@ class CrawlEngine:
         self.novelty = VisualNoveltyArchive(profile.novelty_capacity) if profile.enable_novelty else None
         self.last_novelty = 1.0
 
-        self.seen_page_set = _TTLLRUSet(profile.max_seen_urls, profile.seen_ttl_seconds)
-        self.seen_image_set = _TTLLRUSet(profile.max_seen_urls, profile.seen_ttl_seconds)
+        # Rotating Bloom sets give a horizon of millions of URLs in fixed memory —
+        # the walk's "non-repetition memory". Content hashes stay exact (TTL-LRU):
+        # they are bounded and exactness matters more for payload dedup, and the
+        # visual novelty archive guards the display layer regardless.
+        self.seen_page_set = RotatingBloomSet(profile.seen_capacity, profile.seen_ttl_seconds)
+        self.seen_image_set = RotatingBloomSet(profile.seen_capacity, profile.seen_ttl_seconds)
         self._content_hashes = _TTLLRUSet(profile.max_seen_urls, profile.seen_ttl_seconds)
         self.recent_errors: deque[str] = deque(maxlen=20)
         self.recent_events: deque[dict] = deque(maxlen=80)
@@ -140,6 +147,11 @@ class CrawlEngine:
         self._media_sequence = itertools.count()
         self._seed_cursor = 0
         self._last_seed_page_count = 0
+        # Injection failure backoff: when every configured source yields nothing
+        # (e.g. robots-blocked APIs), stop hammering them every loop.
+        self._seed_backoff_seconds = 0.0
+        self._seed_backoff_until = 0.0
+        self._no_entry_warned = False
         self.stats = {
             "pages_discovered": 0,
             "pages_visited": 0,
@@ -257,6 +269,13 @@ class CrawlEngine:
         self.frontier.rebuild(self.score_frontier_item)
 
     def seed_from_keywords(self) -> None:
+        if self.image_source is None:
+            if self.topic_state.keywords:
+                self.add_event(
+                    "keywords_steering_only",
+                    "Keywords steer frontier scoring only (no media source enabled)",
+                )
+            return
         for keyword in self.topic_state.keywords:
             if keyword not in self.pending_commons_keyword_set:
                 self.pending_commons_keywords.append(keyword)
@@ -280,11 +299,13 @@ class CrawlEngine:
         added = self.frontier.add(item)
         if added:
             self.stats["pages_discovered"] += 1
+            self._no_entry_warned = False
             self.add_event("seed", f"Queued seed: {normalized}", score=round(item.score, 3))
         return added
 
     def add_link(self, url: str, context: str, referrer: FrontierItem, *, nofollow: bool = False) -> bool:
-        if nofollow or referrer.depth + 1 > self.profile.max_depth:
+        max_depth = self.profile.max_depth
+        if nofollow or (max_depth is not None and referrer.depth + 1 > max_depth):
             self.stats["links_rejected"] += 1
             return False
         normalized = canonicalize_url(url, referrer.url)
@@ -411,7 +432,11 @@ class CrawlEngine:
     async def inject_seeds(self, count: int = 1) -> int:
         if not self.seed_sources:
             return 0
+        now = time.monotonic()
+        if now < self._seed_backoff_until:
+            return 0
         injected = 0
+        polled = 0
         attempts = 0
         while injected < count and attempts < len(self.seed_sources):
             source = self.seed_sources[self._seed_cursor % len(self.seed_sources)]
@@ -419,10 +444,25 @@ class CrawlEngine:
             attempts += 1
             try:
                 for seed in await source.poll(count - injected):
+                    polled += 1
                     if self.add_seed(seed.url):
                         injected += 1
             except Exception as error:
                 self.add_error(f"seed {getattr(source, 'name', source)}: {error}")
+        if injected:
+            self._seed_backoff_seconds = 0.0
+            self._seed_backoff_until = 0.0
+        else:
+            # Cool down either way: failing sources must not be hammered every loop,
+            # and re-polling duplicates of a healthy walk is pointless. Only a true
+            # failure (nothing polled at all) is worth an event.
+            self._seed_backoff_seconds = min(max(self._seed_backoff_seconds * 2, 5.0), 300.0)
+            self._seed_backoff_until = time.monotonic() + self._seed_backoff_seconds
+            if polled == 0:
+                self.add_event(
+                    "seed_backoff",
+                    f"Seed injection yielded nothing; backing off {self._seed_backoff_seconds:.0f}s",
+                )
         return injected
 
     async def process_next_commons_keyword(self) -> bool:
@@ -463,6 +503,13 @@ class CrawlEngine:
 
         item = self.frontier.sample(self.temperature, window=self.profile.selection_window)
         if item is None:
+            if not self.seed_sources and not self._no_entry_warned:
+                self._no_entry_warned = True
+                self.add_event(
+                    "no_entry_points",
+                    "Frontier is empty and no seed sources are configured; "
+                    "add seeds via --seed or the control API",
+                )
             await asyncio.sleep(self.profile.empty_frontier_delay_seconds)
             return
         if not self.remember_page(item.url):

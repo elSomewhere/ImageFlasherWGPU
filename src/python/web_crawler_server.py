@@ -22,6 +22,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--control-port", type=int, default=5011)
     parser.add_argument("--keyword", action="append", default=[])
     parser.add_argument("--seed", action="append", default=[])
+    parser.add_argument(
+        "--max-depth",
+        type=int,
+        default=None,
+        help="Maximum link depth from a seed; omit for an unlimited link-only walk",
+    )
+    parser.add_argument(
+        "--seed-plugin",
+        action="append",
+        default=[],
+        choices=("wikipedia_random", "wikidata_official_sites"),
+        help="Opt-in autonomous seed source (repeatable)",
+    )
+    parser.add_argument(
+        "--enable-commons",
+        action="store_true",
+        help="Enable the keyword -> Wikimedia Commons media lane",
+    )
     parser.add_argument("--exploration", type=float, default=Profile.exploration)
     parser.add_argument("--no-autopilot", action="store_true")
     parser.add_argument(
@@ -55,6 +73,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("--exploration must be between 0 and 1")
     if args.page_delay < 0:
         parser.error("--page-delay must be non-negative")
+    if args.max_depth is not None and args.max_depth < 0:
+        parser.error("--max-depth must be non-negative")
     if min(
         args.global_concurrency,
         args.per_origin_concurrency,
@@ -80,6 +100,10 @@ async def main() -> None:
         page_workers=args.page_workers,
         media_workers=args.media_workers,
         random_seed=args.random_seed,
+        max_depth=args.max_depth,
+        seed_plugins=tuple(dict.fromkeys(args.seed_plugin)),
+        operator_seeds=tuple(dict.fromkeys(args.seed)),
+        enable_commons=args.enable_commons,
         compliance=True,
         transport=replace(
             defaults.transport,

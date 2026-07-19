@@ -50,11 +50,15 @@ class Profile:
     worker_delay_seconds: float = 0.2
     empty_frontier_delay_seconds: float = 1.0
     send_delay_seconds: float = 0.0  # deprecated; socket backpressure is used
-    max_depth: int = 5
+    # None = unlimited: a link-only endless walk needs no depth fence. Trap safety
+    # comes from url_policy, per-domain frontier caps, and host stratification.
+    max_depth: int | None = None
     max_frontier_size: int = 20_000
     max_frontier_per_domain: int = 200
     max_seen_urls: int = 100_000
-    seen_ttl_seconds: float = 6 * 3600.0
+    # Approximate per-generation capacity of the rotating Bloom seen-URL sets.
+    seen_capacity: int = 2_000_000
+    seen_ttl_seconds: float = 24 * 3600.0
     max_queue_size: int = 256  # artifact broker capacity
     client_queue_size: int = 32
     client_inflight: int = 16
@@ -94,8 +98,16 @@ class Profile:
     novelty_min: float = 0.05  # below this Hamming distance = near-duplicate, skipped
     novelty_capacity: int = 4096
 
-    # Autonomy: generic seed sources + teleport probability (scaled by temperature).
-    enable_wikipedia_seeds: bool = True
+    # Autonomy: opt-in seed plugins + teleport probability (scaled by temperature).
+    # Empty by default: the walk grows only from operator seeds and discovered links.
+    # Known plugin names: "wikipedia_random", "wikidata_official_sites".
+    seed_plugins: tuple[str, ...] = ()
+    # Operator start URLs; also fed to a recurring source so teleports/refills can
+    # re-inject them if the journey ever dies.
+    operator_seeds: tuple[str, ...] = ()
+    # Keyword -> Wikimedia Commons media lane. Off by default; keywords then only
+    # steer frontier scoring.
+    enable_commons: bool = False
     restart_probability: float = 0.03
     frontier_seed_threshold: int = 100
     seed_interval_pages: int = 25

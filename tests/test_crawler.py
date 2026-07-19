@@ -544,6 +544,150 @@ class NoveltyTests(unittest.TestCase):
         self.assertEqual(engine.stats["images_duplicate"], 1)
 
 
+class EndlessWalkTests(unittest.TestCase):
+    """The link-only endless walk: unlimited depth, bounded memory, quiet failures."""
+
+    def test_default_depth_is_unlimited(self):
+        engine = build_engine(InMemoryWorld({}))
+        deep_referrer = FrontierItem(url="https://example.com/start", depth=500, score=1.0)
+        self.assertTrue(
+            engine.add_link("https://example.com/next", "ctx", deep_referrer)
+        )
+
+    def test_explicit_max_depth_still_caps(self):
+        engine = build_engine(InMemoryWorld({}), profile=Profile(max_depth=2))
+        at_limit = FrontierItem(url="https://example.com/a", depth=2, score=1.0)
+        self.assertFalse(engine.add_link("https://example.com/b", "ctx", at_limit))
+        below_limit = FrontierItem(url="https://example.com/c", depth=1, score=1.0)
+        self.assertTrue(engine.add_link("https://example.com/d", "ctx", below_limit))
+
+    def test_rotating_bloom_add_contains_and_rotation(self):
+        from crawler.core.seen import RotatingBloomSet
+
+        bloom = RotatingBloomSet(capacity=5, ttl=3600.0)
+        first_batch = [f"https://a.example/{i}" for i in range(5)]
+        for url in first_batch:
+            self.assertTrue(bloom.add(url))
+        for url in first_batch:
+            self.assertFalse(bloom.add(url))  # seen -> False, like _TTLLRUSet
+
+        # Fill a second generation; the first rotates out on the one after that.
+        second_batch = [f"https://b.example/{i}" for i in range(6)]
+        for url in second_batch:
+            bloom.add(url)
+        third = "https://c.example/0"
+        bloom.add(third)
+        self.assertNotIn(first_batch[0], bloom)
+        self.assertIn(second_batch[-1], bloom)
+        self.assertIn(third, bloom)
+
+    def test_rotating_bloom_refresh_survives_rotation(self):
+        from crawler.core.seen import RotatingBloomSet
+
+        bloom = RotatingBloomSet(capacity=4, ttl=3600.0)
+        keeper = "https://keep.example/"
+        bloom.add(keeper)
+        for i in range(4):
+            bloom.add(f"https://x.example/{i}")  # rotates keeper into previous
+        self.assertFalse(bloom.add(keeper))  # touch: refresh into current generation
+        for i in range(4):
+            bloom.add(f"https://y.example/{i}")  # one more rotation
+        # The refreshed keeper outlives the rotation; the untouched x0 does not.
+        self.assertIn(keeper, bloom)
+        self.assertNotIn("https://x.example/0", bloom)
+
+    def test_bounded_lru_map_evicts_oldest(self):
+        from crawler.core.seen import BoundedLRUMap
+
+        bounded = BoundedLRUMap(2)
+        bounded["a"] = 1
+        bounded["b"] = 2
+        bounded["c"] = 3
+        self.assertNotIn("a", bounded)
+        bounded["b"] = 20  # refresh recency
+        bounded["d"] = 4
+        self.assertNotIn("c", bounded)
+        self.assertEqual(bounded.get("b"), 20)
+        self.assertEqual(bounded["d"], 4)
+
+    def test_failed_injection_backs_off(self):
+        class _FailingSource:
+            name = "failing"
+
+            def __init__(self):
+                self.polls = 0
+
+            async def poll(self, limit=1):
+                self.polls += 1
+                raise RuntimeError("robots disallowed")
+
+        source = _FailingSource()
+        engine = CrawlEngine(
+            Profile(random_seed=1, empty_frontier_delay_seconds=0.0),
+            page_world=InMemoryWorld({}),
+            media_world=InMemoryWorld({}),
+            extractor=HtmlExtractor(),
+            sink=_CollectingSink(),
+            seed_sources=[source],
+        )
+        run(engine.crawl_once(worker_id=0))
+        self.assertEqual(source.polls, 1)
+        run(engine.crawl_once(worker_id=0))  # within cooldown -> no second poll
+        self.assertEqual(source.polls, 1)
+
+    def test_keywords_without_commons_steer_scoring_only(self):
+        engine = build_engine(InMemoryWorld({}))  # image_source=None
+        engine.topic_state.set_keywords(["brutalism"])
+        engine.seed_from_keywords()
+        self.assertEqual(len(engine.pending_commons_keywords), 0)
+
+    def test_no_entry_points_event_emitted_once(self):
+        engine = build_engine(
+            InMemoryWorld({}), profile=Profile(empty_frontier_delay_seconds=0.0)
+        )
+        run(engine.crawl_once(worker_id=0))
+        run(engine.crawl_once(worker_id=0))
+        events = [event for event in engine.recent_events if event["type"] == "no_entry_points"]
+        self.assertEqual(len(events), 1)
+
+    def test_cycling_static_source_reinjects_operator_seeds(self):
+        from crawler.adapters.seeds.static import StaticSeedSource
+
+        source = StaticSeedSource(["https://one.example/", "https://two.example/"], cycle=True)
+        first = run(source.poll(2))
+        second = run(source.poll(2))
+        self.assertEqual([seed.url for seed in first], [seed.url for seed in second])
+
+        one_shot = StaticSeedSource(["https://one.example/"])
+        self.assertEqual(len(run(one_shot.poll(1))), 1)
+        self.assertEqual(len(run(one_shot.poll(1))), 0)
+
+    def test_seed_plugin_registry(self):
+        from crawler.runtime.assembly import build_seed_sources
+
+        class _FakeBundle:
+            page_world = InMemoryWorld({})
+
+        bundle = _FakeBundle()
+        self.assertEqual(build_seed_sources(Profile(), bundle), [])
+
+        sources = build_seed_sources(
+            Profile(operator_seeds=("https://seed.example/",)), bundle
+        )
+        self.assertEqual([source.name for source in sources], ["static"])
+
+        sources = build_seed_sources(
+            Profile(seed_plugins=("wikipedia_random", "wikidata_official_sites")), bundle
+        )
+        self.assertEqual(
+            [source.name for source in sources],
+            ["wikipedia_random", "wikidata_official_sites"],
+        )
+
+        with self.assertRaises(ValueError):
+            build_seed_sources(Profile(seed_plugins=("unknown",)), bundle)
+
+
 class ImagePipelineTests(unittest.TestCase):
     def test_normalizes_to_png_canvas(self):
         processed = normalize_image(make_png(128, 96), size=64)

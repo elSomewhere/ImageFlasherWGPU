@@ -18,6 +18,7 @@ from ..adapters.extractors.html import HtmlExtractor
 from ..adapters.http_world import AioHttpTransport, HttpWorld
 from ..adapters.processors import ImageProcessor
 from ..adapters.seeds.commons import CommonsImageSource
+from ..adapters.seeds.static import StaticSeedSource
 from ..adapters.seeds.wikipedia_random import WikipediaRandomSeedSource
 from ..adapters.seeds.wikidata import WikidataOfficialSeedSource
 from ..adapters.sinks.websocket import WebSocketImageSink
@@ -98,6 +99,27 @@ def build_real_web_worlds(profile: Profile) -> tuple[World, World]:
     return bundle.page_world, bundle.media_world
 
 
+def build_seed_sources(profile: Profile, web: RealWebBundle) -> list:
+    """Operator seeds are always the recurring refill source; autonomous seeders
+    (Wikipedia/Wikidata) are opt-in plugins named in ``profile.seed_plugins``."""
+    t = profile.transport
+    plugin_builders = {
+        "wikipedia_random": lambda: WikipediaRandomSeedSource(
+            t.user_agent, t.request_timeout, world=web.page_world
+        ),
+        "wikidata_official_sites": lambda: WikidataOfficialSeedSource(web.page_world),
+    }
+    sources = []
+    if profile.operator_seeds:
+        sources.append(StaticSeedSource(list(profile.operator_seeds), cycle=True))
+    for name in profile.seed_plugins:
+        builder = plugin_builders.get(name)
+        if builder is None:
+            raise ValueError(f"Unknown seed plugin: {name!r}")
+        sources.append(builder())
+    return sources
+
+
 class Assembly:
     def __init__(self, profile: Profile) -> None:
         self.profile = profile
@@ -113,29 +135,24 @@ class Assembly:
             client_inflight=profile.client_inflight,
             content_policy=profile.content_policy,
         )
-        seed_sources = []
-        if profile.enable_wikipedia_seeds:
-            seed_sources.extend(
-                [
-                    WikipediaRandomSeedSource(
-                        t.user_agent, t.request_timeout, world=self.web.page_world
-                    ),
-                    WikidataOfficialSeedSource(self.web.page_world),
-                ]
+        image_source = (
+            CommonsImageSource(
+                t.user_agent,
+                t.request_timeout,
+                t.commons_api_limit,
+                world=self.web.page_world,
             )
+            if profile.enable_commons
+            else None
+        )
         self.engine = CrawlEngine(
             profile,
             page_world=self.web.page_world,
             media_world=self.web.media_world,
             extractor=HtmlExtractor(),
             sink=self.sink,
-            image_source=CommonsImageSource(
-                t.user_agent,
-                t.request_timeout,
-                t.commons_api_limit,
-                world=self.web.page_world,
-            ),
-            seed_sources=seed_sources,
+            image_source=image_source,
+            seed_sources=build_seed_sources(profile, self.web),
             processors=ProcessorRegistry(
                 [
                     ImageProcessor(
@@ -161,8 +178,9 @@ class Assembly:
                 asyncio.create_task(self.engine.media_worker(worker_id))
                 for worker_id in range(self.profile.media_workers)
             ),
-            asyncio.create_task(self.engine.commons_worker()),
         ]
+        if self.engine.image_source is not None:
+            workers.append(asyncio.create_task(self.engine.commons_worker()))
         async with self.sink.serve(), self.control.serve():
             logger.info("Image WebSocket on ws://%s:%s", self.profile.image_host, self.profile.image_port)
             logger.info(

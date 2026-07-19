@@ -2,11 +2,12 @@
 
 An interactive digital art piece that viscerally demonstrates **information overload** in our hyperconnected world. Using WebGPU for high-performance rendering, it creates an overwhelming stream of images that flash by faster than human comprehension—mirroring how we consume digital content in the internet age.
 
-The project now includes an autonomous, compliance-first web journey: it continuously
-traverses public links, collects and normalizes media into a bounded rolling buffer,
-and replays the evolving digital world through a GPU-resident image wall. It runs
-without configuration, while keywords, seed URLs, exploration, autopilot, and content
-policy remain steerable at runtime.
+The project now includes an autonomous, compliance-first web journey: starting from
+your seed URLs, it endlessly follows public links, collects and normalizes media into
+a bounded rolling buffer, and replays the evolving digital world through a
+GPU-resident image wall. Keywords, seed URLs, exploration, autopilot, and content
+policy remain steerable at runtime; autonomous Wikimedia seeders are optional
+plugins.
 
 > 📖 **[Read the full conceptual framework](CONCEPT.md)** to understand the artistic vision and cultural commentary behind this project.
 >
@@ -68,9 +69,12 @@ node server.js --reddit --subreddit cyberpunk
 # Generated images mode
 node server.js --generated
 
-# Autonomous crawler; seeds/keywords are optional
-node server.js --web-crawler
-node server.js --web-crawler --keywords brutalism,astronomy
+# Link-only endless walk from your seed URLs
+node server.js --web-crawler --seeds https://blick.ch/
+node server.js --web-crawler --seeds https://blick.ch/ --keywords brutalism,astronomy
+
+# Optional: autonomous Wikimedia seeders and the Commons media lane
+node server.js --web-crawler --seed-plugins wikipedia_random,wikidata_official_sites --enable-commons
 ```
 
 ## 🎮 Interface Usage

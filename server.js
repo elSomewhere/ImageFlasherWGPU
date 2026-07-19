@@ -282,6 +282,15 @@ class ImageFlasherServer {
                     for (const seed of options.seeds || []) {
                         args.push('--seed', seed);
                     }
+                    for (const plugin of options.seedPlugins || []) {
+                        args.push('--seed-plugin', plugin);
+                    }
+                    if (options.maxDepth !== null && options.maxDepth !== undefined) {
+                        args.push('--max-depth', String(options.maxDepth));
+                    }
+                    if (options.enableCommons) {
+                        args.push('--enable-commons');
+                    }
                     console.log('🔎 Starting generic topic-steered web crawler...');
                     break;
                 default:
@@ -436,6 +445,9 @@ function parseArgs() {
     let subreddit = 'worldnews';
     let keywords = [];
     let seeds = [];
+    let seedPlugins = [];
+    let maxDepth = null;
+    let enableCommons = false;
     let crawlerImageHost = CRAWLER_IMAGE_HOST;
     let crawlerControlHost = CRAWLER_CONTROL_HOST;
 
@@ -466,6 +478,22 @@ function parseArgs() {
                     seeds = args[i + 1].split(',').map((value) => value.trim()).filter(Boolean);
                     i++;
                 }
+                break;
+            case '--seed-plugin':
+            case '--seed-plugins':
+                if (i + 1 < args.length) {
+                    seedPlugins = args[i + 1].split(',').map((value) => value.trim()).filter(Boolean);
+                    i++;
+                }
+                break;
+            case '--max-depth':
+                if (i + 1 < args.length) {
+                    maxDepth = args[i + 1];
+                    i++;
+                }
+                break;
+            case '--enable-commons':
+                enableCommons = true;
                 break;
             case '--crawler-image-host':
                 if (i + 1 < args.length) {
@@ -498,8 +526,12 @@ Options:
   --reddit             Use Reddit scraper mode
   --web-crawler        Use generic topic-steered web crawler mode
   --subreddit <name>   Specify subreddit for Reddit mode (default: worldnews)
-  --keywords <terms>   Comma-separated crawler keywords
-  --seeds <urls>       Comma-separated crawler seed URLs
+  --keywords <terms>   Comma-separated crawler keywords (steer scoring)
+  --seeds <urls>       Comma-separated crawler seed URLs (the walk's entry points)
+  --seed-plugins <names> Comma-separated opt-in seed plugins
+                         (wikipedia_random, wikidata_official_sites)
+  --max-depth <n>      Cap link depth from seeds (default: unlimited)
+  --enable-commons     Enable the keyword -> Wikimedia Commons media lane
   --crawler-image-host <host>   Image WebSocket bind host (default: ${CRAWLER_IMAGE_HOST})
   --crawler-control-host <host> Control WebSocket bind host (default: ${CRAWLER_CONTROL_HOST})
   --help, -h           Show this help message
@@ -515,7 +547,17 @@ Examples:
         }
     }
 
-    return { mode, subreddit, keywords, seeds, crawlerImageHost, crawlerControlHost };
+    return {
+        mode,
+        subreddit,
+        keywords,
+        seeds,
+        seedPlugins,
+        maxDepth,
+        enableCommons,
+        crawlerImageHost,
+        crawlerControlHost
+    };
 }
 
 // Main execution

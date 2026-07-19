@@ -26,8 +26,23 @@ class Keyword:
 
 
 class TopicState:
+    # Bounded: the control API can add keywords forever; an endless run must not
+    # accumulate them. Weakest (decayed) terms are evicted past the cap.
+    MAX_KEYWORDS = 256
+
     def __init__(self) -> None:
         self._keywords: dict[str, Keyword] = {}
+
+    def _decayed_weight(self, keyword: Keyword, now: float) -> float:
+        age_minutes = max((now - keyword.updated_at) / 60.0, 0.0)
+        return keyword.weight * (0.96 ** age_minutes)
+
+    def _evict_weakest(self, now: float) -> None:
+        while len(self._keywords) > self.MAX_KEYWORDS:
+            weakest = min(
+                self._keywords.values(), key=lambda keyword: self._decayed_weight(keyword, now)
+            )
+            del self._keywords[weakest.term]
 
     def set_keywords(self, keywords: Iterable[str]) -> list[str]:
         now = time.time()
@@ -37,6 +52,7 @@ class TopicState:
                 if token:
                     normalized[token] = Keyword(token, 1.0, now)
         self._keywords = normalized
+        self._evict_weakest(now)
         return self.keywords
 
     def add_keywords(self, keywords: Iterable[str]) -> list[str]:
@@ -47,6 +63,7 @@ class TopicState:
                     current = self._keywords.get(token)
                     weight = min((current.weight if current else 0.0) + 1.0, 5.0)
                     self._keywords[token] = Keyword(token, weight, now)
+        self._evict_weakest(now)
         return self.keywords
 
     @property

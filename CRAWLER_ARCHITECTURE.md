@@ -7,9 +7,9 @@ normalized artifacts to any connected installation viewers.
 ## Data path
 
 ```text
-Wikipedia random + external exits ─┐
-Wikidata official-site exits ──────┼─> scored, host-stratified URL frontier
-operator seeds and keywords ───────┘                 │
+operator seeds (recurring) ────────┐
+opt-in seed plugins (WMF, ...) ────┼─> scored, host-stratified URL frontier
+links from visited pages ──────────┘                 │
                                                      v
                                             8 page workers
                                                      │
@@ -65,15 +65,27 @@ The public `exploration` control is the main behavioral parameter:
 - Intermediate values blend relevance and wandering; steering biases but never gates.
 
 Selection is host-stratified and the frontier has global and per-registrable-domain
-caps. The unattended autopilot watches visual novelty, recent domain entropy, and
-failure rate. It reheats a repetitive journey and requests a fresh seed at chapter
-boundaries when it appears stuck. The seed rotation spans multilingual Wikipedia
-articles, their external links, and Wikidata P856 official-site links. Keyword input
-also opens a direct Wikimedia Commons media lane with rights metadata.
+caps. Link depth is unlimited by default (`--max-depth` restores a cap): the journey
+is a link-only walk that grows purely from what visited pages link to. Trap safety
+comes from URL policy, per-domain frontier caps, and host stratification rather than
+a depth fence.
+
+The unattended autopilot watches visual novelty, recent domain entropy, and failure
+rate. It reheats a repetitive journey and requests a fresh seed at chapter boundaries
+when it appears stuck. Fresh seeds come from the configured seed sources only:
+operator `--seed` URLs are always available as a recurring source, while autonomous
+seeders are opt-in plugins (`--seed-plugin wikipedia_random`,
+`--seed-plugin wikidata_official_sites`). When every source comes up empty or fails,
+injection backs off exponentially (5s to 300s) instead of retrying each loop.
+Keywords steer frontier scoring; the direct Wikimedia Commons media lane (with rights
+metadata) only activates with `--enable-commons`.
 
 Exact SHA-256 deduplication is followed by bounded visual deduplication using dHash
-plus a compact color histogram. All archives, seen-URL sets, queues, source histories,
-and broker storage are bounded; URL memory also expires after a TTL.
+plus a compact color histogram. All archives, queues, source histories, per-host
+maps, and broker storage are bounded. Seen-URL memory is a pair of rotating Bloom
+filter generations (millions of URLs in a few megabytes, fixed): membership refreshes
+a URL into the current generation, and rotation on capacity or TTL forgets the oldest
+ground — the walk's non-repetition horizon.
 
 ## Compliance and safety invariants
 
@@ -132,18 +144,27 @@ npm run build:wasm
 npm run start:web-crawler
 ```
 
-Open `http://localhost:8000`. No seed or keyword configuration is required. Examples
-of optional steering:
+Open `http://localhost:8000`. Provide at least one `--seed` (or add seeds at runtime)
+— by default the walk grows only from your seeds and the links it discovers, and
+never contacts Wikimedia. Examples of optional steering:
 
 ```bash
+node server.js --web-crawler --seeds "https://blick.ch/"
+
 node server.js --web-crawler \
+  --seeds "https://blick.ch/" \
   --keywords "brutalism,radio astronomy" \
-  --seeds "https://en.wikipedia.org/wiki/Brutalist_architecture"
+  --max-depth 5
+
+# Opt back in to the autonomous Wikimedia seeders and Commons media lane
+node server.js --web-crawler \
+  --seed-plugins wikipedia_random,wikidata_official_sites \
+  --enable-commons --keywords cats
 
 CRAWLER_EXPLORATION=0.85 \
 CRAWLER_PAGE_DELAY=1.5 \
 CRAWLER_CONTENT_POLICY=open-license \
-node server.js --web-crawler
+node server.js --web-crawler --seeds "https://blick.ch/"
 ```
 
 Direct Python flags additionally expose page/media worker counts, global/per-origin

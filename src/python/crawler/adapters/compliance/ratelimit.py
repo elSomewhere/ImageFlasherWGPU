@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
+from ...core.seen import BoundedLRUMap
 from ...ports.world import Resource, World
 
 
@@ -24,8 +25,8 @@ class HostRateLimiter:
 
     def __init__(self, delay_seconds: float, crawl_delays: dict[str, float] | None = None) -> None:
         self.delay_seconds = delay_seconds
-        self.crawl_delays = crawl_delays if crawl_delays is not None else {}
-        self._last_request: dict[str, float] = {}
+        self.crawl_delays = crawl_delays if crawl_delays is not None else BoundedLRUMap(10_000)
+        self._last_request: dict[str, float] = BoundedLRUMap(10_000)
         self._lock = asyncio.Lock()
 
     async def wait(self, hostname: str) -> None:
@@ -84,7 +85,9 @@ class OriginScheduler:
         self.failure_threshold = failure_threshold
         self.circuit_seconds = circuit_seconds
         self.max_origins = max_origins
-        self.crawl_delays: dict[str, float] = {}
+        # Bounded like _origins: an endless walk must not keep a Crawl-delay entry
+        # for every host it ever met.
+        self.crawl_delays: dict[str, float] = BoundedLRUMap(10_000)
         self._origins: dict[str, _OriginState] = {}
 
     @staticmethod
