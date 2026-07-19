@@ -16,15 +16,15 @@ plugins.
 
 ![Demo](https://img.shields.io/badge/WebGPU-Powered-brightgreen) ![Platform](https://img.shields.io/badge/Platform-Web-blue) ![Language](https://img.shields.io/badge/Language-C%2B%2B%2FPython%2FNode.js-orange) ![Art](https://img.shields.io/badge/Purpose-Digital_Art-purple)
 
-## ✨ Enhanced Ikeda Interface
+## ✨ DATAVALANCHE Presentation Layer
 
-This project now features an **enhanced Ryoji Ikeda-inspired interface** with:
+The presentation layer renders the crawl as a monochrome data avalanche in the register of Ryoji Ikeda / raster-noton:
 
-- 🎨 **13 Visual Modes**: BLACK/WHITE, GRID, DATA, BINARY, FREQUENCY, SCAN, MATRIX, PULSE, NOISE, STRIP, PHASE, QUANTUM
-- 📊 **Real-time Data Analysis**: Live image statistics, entropy, variance, edge density
-- ⌨️ **Exhibition-Ready Controls**: Instant keyboard shortcuts for seamless performance
-- 🖤 **Minimalist Aesthetic**: Pure black/white interface matching Ikeda's design philosophy
-- 📡 **Live Data Visualization**: Transform images into mathematical representations
+- 🎨 **10 Tile Materials**: every tile re-materializes its image as halftone, wireframe, pixel-sort smear, waveform readout, barcode, hex-glyph rain, mosaic, or hard 1-bit data
+- 🧨 **Datamosh Feedback**: block-displacement + P-frame-drop feedback loop; arriving artifacts inject glitch energy
+- 🔊 **Data Sonification**: clicks per artifact, raw image bytes as PCM, analysis-pitched sine grid, sub pulses — the crawl made audible
+- 🎼 **Autonomous Conductor**: scenes cut and drift on their own; the piece runs config-free but stays fully steerable
+- 🖤 **Strict Monochrome**: hairline grids, scanlines, binary timecode, strobe — the interface disappears behind the work
 
 ## 🚀 Quick Start
 
@@ -80,32 +80,52 @@ node server.js --web-crawler --seed-plugins wikipedia_random,wikidata_official_s
 ## 🎮 Interface Usage
 
 ### Web Interface
-Open `http://localhost:8000` to access the **Data.Matrix** interface featuring:
+Open `http://localhost:8000` for the **DATAVALANCHE** presentation. The canvas is the interface; controls stay hidden until requested:
 
-- **Visual Mode Selector**: Switch between 13 distinct processing modes
-- **Core Processing**: Threshold, grid size, data intensity controls
-- **Mode Parameters**: Frequency, scan speed, matrix scale, pulse rate, etc.
-- **Live Analysis**: Real-time luminance, entropy, variance, edge density
-- **Motion Controls**: Scrolling speed and offset adjustments
-- **Crawler Steering**: Exploration/autopilot, keywords, seeds, content policy, live queue metrics
-- **Delivery Telemetry**: Received, decoded, GPU-uploaded, and presented artifact counts
+- **Conductor**: autonomous scene evolution (default ON) — scenes cut every 12–45 s, parameters breathe continuously, glitch pulses fire stochastically. Manual edits to any material/tone slider take over and disable auto.
+- **Panel** (`H`): scene select, tile materials, tone, structure, datamosh, temporal, flow, audio, and crawler steering.
+- **Sonification** (`A` or SOUND button): Ikeda-style clicks per crawled artifact, raw image bytes played as PCM bursts, a sine grid pitched by per-image analysis (luminance→pitch, entropy→duration), sub pulses on scene cuts — all through a limiter.
+- **Crawler Steering**: exploration/autopilot, keywords, seeds, content policy, live queue metrics.
+- **Delivery Telemetry**: received, decoded, GPU-uploaded, and presented artifact counts in the status strip.
 
 ### Keyboard Shortcuts (Exhibition Ready)
 
 | Key | Action |
 |-----|--------|
-| `1-9, 0, -, =` | Switch to modes 1-13 |
-| `B` | Black/White mode |
-| `G` | Grid mode |
-| `D` | Data mode |
-| `F` | Frequency mode |
-| `S` | Scan mode |
-| `M` | Matrix mode |
-| `P` | Pulse mode |
-| `N` | Noise mode |
-| `T` | Cycle threshold values |
-| `R` | Reset to defaults |
-| `ESC` | Toggle fullscreen |
+| `H` | Toggle control panel |
+| `A` | Toggle sonification |
+| `SPACE` | Cut to a new scene |
+| `P` | Fire a glitch pulse |
+| `I` | Momentary invert flash |
+| `F` | Toggle fullscreen |
+| `0-7` | Jump to scene by index |
+
+## 🎨 Presentation Layer
+
+### Tile materials
+Each tile renders its ring-buffer image through one of 10 monochrome materials; every tile picks between the two active styles by stable hash, so the wall is heterogeneous but coherent:
+
+| # | Material | Treatment |
+|---|----------|-----------|
+| 0 | RAW | grayscale luma |
+| 1 | THRESH | 1-bit threshold, per-tile jitter |
+| 2 | BAYER | ordered-dither halftone |
+| 3 | EDGE | Sobel wireframe on black |
+| 4 | SORT | luma-keyed pixel-sort smear |
+| 5 | SLICE | displaced bands + posterize |
+| 6 | WAVE | image rows redrawn as waveform bars |
+| 7 | BARCODE | columns collapsed to stripes |
+| 8 | HEX | image blocks printed as hex glyphs |
+| 9 | BLOCKS | hard mosaic with dropout |
+
+### Datamosh feedback
+The frame-blend pass is a mosh engine: the previous frame is re-sampled through block displacement ("broken motion vectors", re-rolled 7×/s) and per-block **P-frame drops** that hold stale image data with luminance decay. Arriving artifacts and scene cuts inject event energy that spikes the mosh and shears the frame.
+
+### Global composition
+Scanlines + rolling sync bar, hairline grid, sparse bit-flip noise, binary timecode strip, strobe/invert, hard mono enforcement (optional color bleed). Scenes: HALFTONE FIELD, BINARY WALL, WIREFRAME, MELT, READOUT, HEX RAIN, AVALANCHE, STATIC.
+
+### Render parameter API (WASM exports)
+`setStyles(a,b,prob)` · `setTone(threshold,contrast,colorBleed,jitter)` · `setStructure(dither,block,sliceAmp,grid)` · `setMosh(amount,block,drop,decay)` · `setTemporal(scanline,noise,strobe,invert)` · `pulse(strength)` plus the flow controls (`setFadeFactor`, `setImageSwitchInterval`, `setTileFactor`, `setRandomTileFraction`, `setScrollingSpeed`, `setMaxUploadsPerFrame`). All share one 96-byte `RenderParams` uniform bound in every pass.
 
 ## 🏗️ Development
 
@@ -158,24 +178,6 @@ npm run rebuild
 | `npm run clean` | Clean build artifacts |
 | `npm run rebuild` | Full rebuild cycle |
 | `npm test` | Run the crawler and protocol regression suite |
-
-## 🎨 Visual Modes
-
-### Core Modes
-- **BLACK/WHITE** (1): Pure binary representation
-- **GRID** (2): Geometric decomposition  
-- **DATA** (3): Statistical visualization
-- **BINARY** (4): Digital encoding display
-
-### Advanced Processing
-- **FREQUENCY** (5): Spectral analysis visualization
-- **SCAN** (6): Progressive image scanning
-- **MATRIX** (7): Mathematical transformation
-- **PULSE** (8): Rhythmic intensity modulation
-- **NOISE** (9): Entropy-based pattern generation
-- **STRIP** (10): Linear decomposition
-- **PHASE** (11): Phase shift visualization
-- **QUANTUM** (12): Discrete state representation
 
 ## 🔧 Technical Architecture
 

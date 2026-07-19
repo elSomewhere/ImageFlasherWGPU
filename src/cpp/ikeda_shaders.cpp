@@ -1,346 +1,257 @@
-// Enhanced Ikeda-Inspired Shaders for ImageFlasherWGPU
-// Extended Phase 2: Advanced Data Visualization Modes
-// 
-// New Modes Added:
-// - Mode 5: FREQUENCY - Spectral analysis and frequency domain visualization
-// - Mode 6: SCAN - Progressive scanning patterns inspired by "superposition"
-// - Mode 7: MATRIX - Mathematical matrix operations and transformations
-// - Mode 8: PULSE - Temporal rhythm and pulse patterns
-// - Mode 9: NOISE - Random data generation and pattern analysis
-// - Mode 10: STRIP - Horizontal/vertical strip decomposition
-// - Mode 11: PHASE - Phase relationships and interference patterns
-// - Mode 12: QUANTUM - Quantized levels and discrete data states
+// ============================================================================
+// Monochrome data-materialization shaders for ImageFlasherWGPU
+//
+// Three fragment stages share one 96-byte RenderParams uniform:
+//
+//   1. Tile pass   (ikedaImageFlasherFragmentWGSL)
+//      Every tile renders its ring-buffer image through a per-tile "material":
+//      raw luma, 1-bit threshold, Bayer halftone, Sobel wireframe, pixel-sort
+//      smear, slice glitch, waveform readout, barcode collapse, hex-glyph
+//      rain, or mosaic blocks. Tiles choose between two active styles by
+//      stable per-tile hash, so the wall is heterogeneous but coherent.
+//
+//   2. Mosh pass   (ikedaFadeFragmentWGSL)
+//      Temporal feedback. Blends the previous frame into the new one, but the
+//      previous frame is re-sampled through block displacement (broken motion
+//      vectors) and per-block "P-frame drops" that hold stale image data.
+//      This is the datamoshing engine; fade remains the base blend factor.
+//
+//   3. Present pass (ikedaPresentFragmentWGSL)
+//      Global composition: scroll, slice glitches on event pulses, scanlines,
+//      rolling sync bar, hairline grid, bit-noise, strobe/invert, binary
+//      timecode strip, hard monochrome enforcement.
+//
+// All texture reads use textureSampleLevel so styles may branch on per-tile
+// (non-uniform) values without violating WGSL uniformity rules.
+// ============================================================================
 
-// ==================== ENHANCED IKEDA MODE UNIFORMS ====================
+#include <string>
 
-const char* ikedaModeUniformWGSL = R"(
-struct IkedaModeParams {
-    preprocessingMode : i32,  // 0=color, 1=black/white
-    postprocessingMode : i32, // 0=grid, 1=data, 2=binary, 3=frequency, 4=scan, 5=matrix, 6=pulse, 7=noise, 8=strip, 9=phase, 10=quantum
-    threshold : f32,         // black/white threshold for preprocessing
-    gridSize : f32,          // grid quantization size
-    dataIntensity : f32,     // data overlay intensity
-    time : f32,              // global time for animations
-    canvasWidth : f32,       // for precise calculations
-    canvasHeight : f32,      // for precise calculations
-    
-    // Mode-specific parameters
-    frequency : f32,         // frequency analysis parameter
-    phaseShift : f32,        // phase shift for wave patterns
-    noiseLevel : f32,        // noise generation level
-    stripWidth : f32,        // strip decomposition width
-    quantumLevels : f32,     // quantum state levels
-    scanSpeed : f32,         // scanning speed
-    matrixScale : f32,       // matrix transformation scale
-    pulseRate : f32          // pulse rhythm rate
-}
-)";
+// Shared uniform block + helpers, injected into each fragment shader below.
+static const char* renderParamsWGSL = R"(
+struct RenderParams {
+    time : f32,          // seconds
+    eventPulse : f32,    // 0..1 impulse, decays in C++
+    strobe : f32,        // 0..1 strobe intensity
+    sceneMix : f32,      // reserved for scene crossfades
 
-// ==================== ENHANCED IMAGE FLASHER SHADER ====================
+    styleA : f32,        // primary tile material id
+    styleB : f32,        // secondary tile material id
+    styleMixProb : f32,  // probability a tile uses styleB
+    threshold : f32,     // 1-bit threshold center
 
-const char* ikedaImageFlasherFragmentWGSL = R"(
-struct IkedaModeParams {
-    preprocessingMode : i32,
-    postprocessingMode : i32,
-    threshold : f32,
-    gridSize : f32,
-    dataIntensity : f32,
-    time : f32,
+    ditherScale : f32,   // Bayer cell size in pixels
+    blockScale : f32,    // glyph/mosaic cell size in pixels
+    sliceAmp : f32,      // slice displacement amplitude (uv)
+    jitterAmp : f32,     // per-tile threshold jitter
+
+    moshAmount : f32,    // block displacement strength
+    moshBlock : f32,     // mosh block size (uv)
+    moshDrop : f32,      // probability a block holds stale data
+    feedbackDecay : f32, // luminance decay of held blocks
+
+    invert : f32,        // 0..1 global inversion
+    gridOverlay : f32,   // hairline grid + timecode intensity
+    scanline : f32,      // scanline + rolling bar intensity
+    noiseAmount : f32,   // bit-flip noise intensity
+
     canvasWidth : f32,
     canvasHeight : f32,
-    
-    // Mode-specific parameters
-    frequency : f32,
-    phaseShift : f32,
-    noiseLevel : f32,
-    stripWidth : f32,
-    quantumLevels : f32,
-    scanSpeed : f32,
-    matrixScale : f32,
-    pulseRate : f32
+    colorBleed : f32,    // 0 = strict mono, 1 = source color
+    contrast : f32       // luma contrast around 0.5
 }
 
-@group(0) @binding(1) var texArr : texture_2d_array<f32>;
-@group(0) @binding(2) var samp : sampler;
-@group(0) @binding(3) var<uniform> ikeda : IkedaModeParams;
-
-// Precise luminance calculation
-fn luminance(color: vec3<f32>) -> f32 {
-    return dot(color, vec3<f32>(0.299, 0.587, 0.114));
+fn luma(c : vec3<f32>) -> f32 {
+    return dot(c, vec3<f32>(0.2126, 0.7152, 0.0722));
 }
 
-// Restructured fragment function with preprocessing and postprocessing pipeline
-@fragment
-fn fsImage(
-    @location(0) uv : vec2<f32>,
-    @location(1) @interpolate(flat) layerIndex : i32
-) -> @location(0) vec4<f32> {
-    var sampledColor = textureSample(texArr, samp, uv, layerIndex);
-    
-    // ========== PREPROCESSING STAGE ==========
-    var processedColor = sampledColor;
-    let lum = luminance(sampledColor.rgb);
-    
-    // Preprocessing Mode 0: Color with intensity and contrast controls
-    if (ikeda.preprocessingMode == 0) {
-        // Use threshold as contrast/brightness adjustment (-0.5 to +0.5 range)
-        let contrast = ikeda.threshold * 2.0 - 1.0; // Convert 0-1 to -1 to +1 range
-        let adjusted = (sampledColor.rgb - 0.5) * (1.0 + contrast) + 0.5;
-        
-        // Use dataIntensity as color saturation/intensity multiplier
-        let intensity = ikeda.dataIntensity * 2.0; // 0-2 range for intensity
-        let saturated = mix(vec3<f32>(lum), adjusted, intensity);
-        
-        processedColor = vec4<f32>(clamp(saturated, vec3<f32>(0.0), vec3<f32>(1.0)), sampledColor.a);
-    }
-    
-    // Preprocessing Mode 1: Black & White conversion
-    if (ikeda.preprocessingMode == 1) {
-        let dynamicThreshold = ikeda.threshold + sin(ikeda.time * 1.5) * 0.05;
-        let blackWhite = step(dynamicThreshold, lum);
-        processedColor = vec4<f32>(blackWhite, blackWhite, blackWhite, sampledColor.a);
-    }
-    
-    // ========== POSTPROCESSING STAGE ==========
-    var finalColor = processedColor;
-    
-    // Postprocessing Mode 0: None (no postprocessing, just return preprocessed result)
-    if (ikeda.postprocessingMode == 0) {
-        finalColor = processedColor;
-    }
-    
-    // Postprocessing Mode 1: Grid Quantization
-    if (ikeda.postprocessingMode == 1) {
-        let pixelSize = 1.0 / ikeda.gridSize;
-        let quantizedUV = floor(uv / pixelSize) * pixelSize + pixelSize * 0.5;
-        let quantizedColor = textureSample(texArr, samp, quantizedUV, layerIndex);
-        
-        if (ikeda.preprocessingMode == 1) {
-            let quantLum = luminance(quantizedColor.rgb);
-            let blackWhite = step(ikeda.threshold, quantLum);
-            finalColor = vec4<f32>(blackWhite, blackWhite, blackWhite, sampledColor.a);
-        } else {
-            finalColor = quantizedColor;
-        }
-    }
-    
-    // Postprocessing Mode 2: Data Visualization Overlay
-    if (ikeda.postprocessingMode == 2) {
-        let baseLum = luminance(processedColor.rgb);
-        
-        // Simple data pattern
-        let barcodeCoord = uv.x * 80.0 + baseLum * 5.0;
-        let barcodePattern = step(0.5, fract(barcodeCoord + sin(ikeda.time * 0.5) * 0.1));
-        
-        let blendedData = barcodePattern * ikeda.dataIntensity;
-        
-        if (ikeda.preprocessingMode == 1) {
-            let blackWhite = processedColor.r;
-            let finalValue = clamp(blackWhite + blendedData * (1.0 - blackWhite), 0.0, 1.0);
-            finalColor = vec4<f32>(finalValue, finalValue, finalValue, sampledColor.a);
-        } else {
-            finalColor = mix(processedColor, vec4<f32>(1.0, 1.0, 1.0, sampledColor.a), blendedData);
-        }
-    }
-    
-    // Postprocessing Mode 3: Binary Data Stream
-    if (ikeda.postprocessingMode == 3) {
-        let scanlineCount = 48.0;
-        let scanlineY = floor(uv.y * scanlineCount);
-        let scanlineUV = vec2<f32>(uv.x, (scanlineY + 0.5) / scanlineCount);
-        let scanlineColor = textureSample(texArr, samp, scanlineUV, layerIndex);
-        let scanLum = luminance(scanlineColor.rgb);
-        
-        // Binary pattern
-        let binaryPattern = step(0.5, fract(uv.x * 64.0 + scanLum * 8.0));
-        finalColor = vec4<f32>(binaryPattern, binaryPattern, binaryPattern, sampledColor.a);
-    }
-    
-    // Postprocessing Mode 4: Frequency Analysis
-    if (ikeda.postprocessingMode == 4) {
-        let baseLum = luminance(processedColor.rgb);
-        
-        // Frequency bars based on luminance and frequency parameter
-        let freqScale = ikeda.frequency * 2.0;
-        let freqPattern = sin(uv.y * freqScale * 20.0 + ikeda.time * 2.0) * 0.5 + 0.5;
-        let horizontalBars = step(0.6, freqPattern);
-        
-        // Spectral analysis overlay
-        let spectralCoord = uv.x * freqScale * 10.0 + baseLum * 5.0;
-        let spectralPattern = step(0.5, fract(spectralCoord + sin(ikeda.time) * 0.2));
-        
-        if (ikeda.preprocessingMode == 1) {
-            let blackWhite = processedColor.r;
-            let combined = clamp(blackWhite + (horizontalBars + spectralPattern) * ikeda.dataIntensity * 0.3, 0.0, 1.0);
-            finalColor = vec4<f32>(combined, combined, combined, sampledColor.a);
-        } else {
-            let overlayIntensity = (horizontalBars + spectralPattern) * ikeda.dataIntensity * 0.3;
-            finalColor = mix(processedColor, vec4<f32>(1.0, 1.0, 1.0, sampledColor.a), overlayIntensity);
-        }
-    }
-    
-    // Postprocessing Mode 5: Scan Lines
-    if (ikeda.postprocessingMode == 5) {
-        let baseLum = luminance(processedColor.rgb);
-        
-        // Progressive scanning based on scanSpeed
-        let scanPosition = fract(ikeda.time * ikeda.scanSpeed);
-        let scanLine = abs(uv.y - scanPosition);
-        let scanEffect = step(scanLine, 0.02);
-        
-        // Interlaced pattern
-        let interlace = step(0.5, fract(uv.y * 240.0));
-        
-        if (ikeda.preprocessingMode == 1) {
-            let blackWhite = processedColor.r;
-            let combined = clamp(blackWhite + (scanEffect + interlace * 0.3) * ikeda.dataIntensity, 0.0, 1.0);
-            finalColor = vec4<f32>(combined, combined, combined, sampledColor.a);
-        } else {
-            let overlayIntensity = (scanEffect + interlace * 0.3) * ikeda.dataIntensity;
-            finalColor = mix(processedColor, vec4<f32>(1.0, 1.0, 1.0, sampledColor.a), overlayIntensity);
-        }
-    }
-    
-    // Postprocessing Mode 6: Matrix Transformations
-    if (ikeda.postprocessingMode == 6) {
-        let baseLum = luminance(processedColor.rgb);
-        
-        // Rotating grid based on matrixScale
-        let scale = ikeda.matrixScale;
-        let rotation = ikeda.time * 0.5;
-        let rotatedUV = vec2<f32>(
-            uv.x * cos(rotation) - uv.y * sin(rotation),
-            uv.x * sin(rotation) + uv.y * cos(rotation)
-        );
-        
-        let gridPattern = step(0.9, fract(rotatedUV.x * scale * 20.0)) + 
-                         step(0.9, fract(rotatedUV.y * scale * 20.0));
-        
-        if (ikeda.preprocessingMode == 1) {
-            let blackWhite = processedColor.r;
-            let combined = clamp(blackWhite + gridPattern * ikeda.dataIntensity, 0.0, 1.0);
-            finalColor = vec4<f32>(combined, combined, combined, sampledColor.a);
-        } else {
-            finalColor = mix(processedColor, vec4<f32>(1.0, 1.0, 1.0, sampledColor.a), gridPattern * ikeda.dataIntensity);
-        }
-    }
-    
-    // Postprocessing Mode 7: Pulse Patterns
-    if (ikeda.postprocessingMode == 7) {
-        let baseLum = luminance(processedColor.rgb);
-        
-        // Radial pulse based on pulseRate
-        let center = vec2<f32>(0.5, 0.5);
-        let dist = distance(uv, center);
-        let pulse = sin(dist * 20.0 - ikeda.time * ikeda.pulseRate * 4.0) * 0.5 + 0.5;
-        let pulsePattern = step(0.7, pulse);
-        
-        // Rhythmic grid
-        let rhythmicGrid = step(0.8, fract(uv.x * 10.0 + sin(ikeda.time * ikeda.pulseRate) * 2.0)) +
-                          step(0.8, fract(uv.y * 10.0 + cos(ikeda.time * ikeda.pulseRate) * 2.0));
-        
-        if (ikeda.preprocessingMode == 1) {
-            let blackWhite = processedColor.r;
-            let combined = clamp(blackWhite + (pulsePattern + rhythmicGrid * 0.3) * ikeda.dataIntensity, 0.0, 1.0);
-            finalColor = vec4<f32>(combined, combined, combined, sampledColor.a);
-        } else {
-            let overlayIntensity = (pulsePattern + rhythmicGrid * 0.3) * ikeda.dataIntensity;
-            finalColor = mix(processedColor, vec4<f32>(1.0, 1.0, 1.0, sampledColor.a), overlayIntensity);
-        }
-    }
-    
-    // Postprocessing Mode 8: Noise Patterns
-    if (ikeda.postprocessingMode == 8) {
-        let baseLum = luminance(processedColor.rgb);
-        
-        // Structured noise based on noiseLevel
-        let noiseCoord = uv * 50.0 + ikeda.time * 0.1;
-        let noise1 = fract(sin(dot(noiseCoord, vec2<f32>(12.9898, 78.233))) * 43758.5453);
-        let noise2 = fract(sin(dot(noiseCoord + vec2<f32>(1.0, 1.0), vec2<f32>(12.9898, 78.233))) * 43758.5453);
-        
-        let noisePattern = step(1.0 - ikeda.noiseLevel, noise1);
-        let structuredNoise = step(0.5, noise2) * ikeda.noiseLevel;
-        
-        if (ikeda.preprocessingMode == 1) {
-            let blackWhite = processedColor.r;
-            let combined = clamp(blackWhite + (noisePattern + structuredNoise) * ikeda.dataIntensity, 0.0, 1.0);
-            finalColor = vec4<f32>(combined, combined, combined, sampledColor.a);
-        } else {
-            let overlayIntensity = (noisePattern + structuredNoise) * ikeda.dataIntensity;
-            finalColor = mix(processedColor, vec4<f32>(1.0, 1.0, 1.0, sampledColor.a), overlayIntensity);
-        }
-    }
-    
-    // Postprocessing Mode 9: Strip Decomposition
-    if (ikeda.postprocessingMode == 9) {
-        let baseLum = luminance(processedColor.rgb);
-        
-        // Alternating horizontal/vertical strips based on stripWidth
-        let stripSize = ikeda.stripWidth * 10.0;
-        let horizontalStrips = step(0.5, fract(uv.y / stripSize));
-        let verticalStrips = step(0.5, fract(uv.x / stripSize));
-        
-        // Time-based switching between horizontal and vertical
-        let timeSwitch = step(0.5, fract(ikeda.time * 0.3));
-        let stripPattern = mix(horizontalStrips, verticalStrips, timeSwitch);
-        
-        if (ikeda.preprocessingMode == 1) {
-            let blackWhite = processedColor.r;
-            let combined = clamp(blackWhite * stripPattern + (1.0 - stripPattern) * blackWhite * 0.3, 0.0, 1.0);
-            finalColor = vec4<f32>(combined, combined, combined, sampledColor.a);
-        } else {
-            finalColor = mix(processedColor * 0.3, processedColor, stripPattern);
-        }
-    }
-    
-    // Postprocessing Mode 10: Phase Interference
-    if (ikeda.postprocessingMode == 10) {
-        let baseLum = luminance(processedColor.rgb);
-        
-        // Multiple wave phases with interference
-        let wave1 = sin(uv.x * 30.0 + ikeda.time + ikeda.phaseShift);
-        let wave2 = sin(uv.y * 30.0 + ikeda.time * 1.2);
-        let wave3 = sin((uv.x + uv.y) * 20.0 + ikeda.time * 0.8 + ikeda.phaseShift * 2.0);
-        
-        let interference = (wave1 + wave2 + wave3) / 3.0;
-        let phasePattern = step(0.3, interference * 0.5 + 0.5);
-        
-        if (ikeda.preprocessingMode == 1) {
-            let blackWhite = processedColor.r;
-            let combined = clamp(blackWhite + phasePattern * ikeda.dataIntensity * 0.4, 0.0, 1.0);
-            finalColor = vec4<f32>(combined, combined, combined, sampledColor.a);
-        } else {
-            finalColor = mix(processedColor, vec4<f32>(1.0, 1.0, 1.0, sampledColor.a), phasePattern * ikeda.dataIntensity * 0.4);
-        }
-    }
-    
-    // Postprocessing Mode 11: Quantum Levels
-    if (ikeda.postprocessingMode == 11) {
-        let baseLum = luminance(processedColor.rgb);
-        
-        // Quantize luminance to discrete levels
-        let levels = ikeda.quantumLevels;
-        let quantizedLum = floor(baseLum * levels) / levels;
-        
-        // Quantum tunneling effect
-        let tunnelCoord = uv * 20.0 + ikeda.time * 0.2;
-        let tunnel = fract(sin(dot(tunnelCoord, vec2<f32>(12.9898, 78.233))) * 43758.5453);
-        let tunnelPattern = step(0.9, tunnel) * (1.0 / levels);
-        
-        // Energy level visualization
-        let energyLevel = floor(quantizedLum * levels) / levels;
-        let levelPattern = step(ikeda.threshold, energyLevel + tunnelPattern);
-        
-        finalColor = vec4<f32>(levelPattern, levelPattern, levelPattern, sampledColor.a);
-    }
-    
-    return finalColor;
+fn hash11(p : f32) -> f32 {
+    var x = fract(p * 0.1031);
+    x = x * (x + 33.33);
+    x = x * (x + x);
+    return fract(x);
+}
+
+fn hash21(p : vec2<f32>) -> f32 {
+    var p3 = fract(vec3<f32>(p.xyx) * 0.1031);
+    p3 = p3 + dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+fn bayer4(pos : vec2<f32>) -> f32 {
+    var m = array<f32, 16>(
+         0.0,  8.0,  2.0, 10.0,
+        12.0,  4.0, 14.0,  6.0,
+         3.0, 11.0,  1.0,  9.0,
+        15.0,  7.0, 13.0,  5.0
+    );
+    let x = u32(pos.x) % 4u;
+    let y = u32(pos.y) % 4u;
+    return (m[y * 4u + x] + 0.5) / 16.0;
+}
+
+// 4x5 hex glyphs, one packed u32 per digit; bit index = row*4 + col, col 0 left.
+fn hexGlyph(v : u32, cell : vec2<u32>) -> f32 {
+    var glyphs = array<u32, 16>(
+        (6u|(9u<<4u)|(9u<<8u)|(9u<<12u)|(6u<<16u)),   // 0
+        (2u|(3u<<4u)|(2u<<8u)|(2u<<12u)|(7u<<16u)),   // 1
+        (6u|(9u<<4u)|(4u<<8u)|(2u<<12u)|(15u<<16u)),  // 2
+        (7u|(8u<<4u)|(6u<<8u)|(8u<<12u)|(7u<<16u)),   // 3
+        (9u|(9u<<4u)|(15u<<8u)|(8u<<12u)|(8u<<16u)),  // 4
+        (15u|(1u<<4u)|(7u<<8u)|(8u<<12u)|(7u<<16u)),  // 5
+        (6u|(1u<<4u)|(7u<<8u)|(9u<<12u)|(6u<<16u)),   // 6
+        (15u|(8u<<4u)|(4u<<8u)|(2u<<12u)|(2u<<16u)),  // 7
+        (6u|(9u<<4u)|(6u<<8u)|(9u<<12u)|(6u<<16u)),   // 8
+        (6u|(9u<<4u)|(14u<<8u)|(8u<<12u)|(6u<<16u)),  // 9
+        (6u|(9u<<4u)|(15u<<8u)|(9u<<12u)|(9u<<16u)),  // A
+        (7u|(9u<<4u)|(7u<<8u)|(9u<<12u)|(7u<<16u)),   // B
+        (6u|(9u<<4u)|(1u<<8u)|(9u<<12u)|(6u<<16u)),   // C
+        (7u|(9u<<4u)|(9u<<8u)|(9u<<12u)|(7u<<16u)),   // D
+        (15u|(1u<<4u)|(7u<<8u)|(1u<<12u)|(15u<<16u)), // E
+        (15u|(1u<<4u)|(7u<<8u)|(1u<<12u)|(1u<<16u))   // F
+    );
+    if (cell.x >= 4u || cell.y >= 5u) { return 0.0; }
+    let bit = (glyphs[v & 15u] >> (cell.y * 4u + cell.x)) & 1u;
+    return f32(bit);
 }
 )";
 
-// ==================== ENHANCED FADE SHADER ====================
+// ==================== TILE PASS ====================
+// Renders one instanced quad per tile. Style ids:
+//   0 RAW  1 THRESH  2 BAYER  3 EDGE  4 SORT  5 SLICE
+//   6 WAVE 7 BARCODE 8 HEX    9 BLOCKS
+static const std::string ikedaImageFlasherFragmentSrc = std::string(renderParamsWGSL) + R"(
+@group(0) @binding(1) var texArr : texture_2d_array<f32>;
+@group(0) @binding(2) var samp : sampler;
+@group(0) @binding(3) var<uniform> P : RenderParams;
 
-const char* ikedaFadeFragmentWGSL = R"(
+fn tileLuma(uv : vec2<f32>, layer : i32) -> f32 {
+    let c = textureSampleLevel(texArr, samp, clamp(uv, vec2<f32>(0.0), vec2<f32>(1.0)), layer, 0.0);
+    return luma(c.rgb);
+}
+
+fn shapeLuma(g : f32) -> f32 {
+    return clamp((g - 0.5) * max(P.contrast, 0.01) + 0.5, 0.0, 1.0);
+}
+
+@fragment
+fn fsImage(
+    @builtin(position) fragPos : vec4<f32>,
+    @location(0) uv : vec2<f32>,
+    @location(1) @interpolate(flat) layerIndex : i32,
+    @location(2) @interpolate(flat) instanceId : u32
+) -> @location(0) vec4<f32> {
+    let inst = f32(instanceId);
+    let tileSeed = hash11(inst * 17.13 + 0.37);          // stable per tile
+    let flashSeed = hash11(inst * 7.77 + f32(layerIndex) * 3.71); // re-rolls on switch
+
+    // Choose material per tile.
+    var style = i32(P.styleA + 0.5);
+    if (hash11(inst * 5.19 + 11.7) < P.styleMixProb) {
+        style = i32(P.styleB + 0.5);
+    }
+
+    let srcColor = textureSampleLevel(texArr, samp, uv, layerIndex, 0.0);
+    var g = shapeLuma(luma(srcColor.rgb));
+    var outv = g;
+
+    switch style {
+        case 0: { // RAW grayscale
+            outv = g;
+        }
+        case 1: { // THRESH: 1-bit, per-tile jittered threshold
+            let t = clamp(P.threshold + (tileSeed - 0.5) * P.jitterAmp, 0.05, 0.95);
+            outv = step(t, g);
+        }
+        case 2: { // BAYER halftone
+            let cellPx = max(P.ditherScale, 1.0);
+            outv = step(bayer4(floor(fragPos.xy / cellPx)), g);
+        }
+        case 3: { // EDGE: Sobel wireframe on black
+            let e = 1.0 / 384.0;
+            let l  = tileLuma(uv + vec2<f32>(-e, 0.0), layerIndex);
+            let r  = tileLuma(uv + vec2<f32>( e, 0.0), layerIndex);
+            let u2 = tileLuma(uv + vec2<f32>(0.0, -e), layerIndex);
+            let d  = tileLuma(uv + vec2<f32>(0.0,  e), layerIndex);
+            let mag = length(vec2<f32>(r - l, d - u2)) * 4.0;
+            outv = step(P.threshold * 0.6, mag);
+        }
+        case 4: { // SORT: luma-keyed horizontal smear (pixel-sort impression)
+            let bands = 48.0;
+            let band = floor(uv.y * bands) / bands;
+            let key = tileLuma(vec2<f32>(0.03, band + 0.5 / bands), layerIndex);
+            var acc = 0.0;
+            let reach = (0.02 + 0.25 * key) * (0.5 + tileSeed);
+            for (var i = 0; i < 8; i = i + 1) {
+                let s = tileLuma(vec2<f32>(uv.x - reach * f32(i) / 8.0, uv.y), layerIndex);
+                acc = max(acc, s);
+            }
+            outv = step(P.threshold, shapeLuma(acc));
+        }
+        case 5: { // SLICE: displaced horizontal bands + posterize
+            let sliceH = 0.04 + 0.08 * tileSeed;
+            let band = floor(uv.y / sliceH);
+            let roll = floor(P.time * 6.0);
+            let off = (hash21(vec2<f32>(band, roll + inst)) - 0.5)
+                      * P.sliceAmp * step(0.6, hash21(vec2<f32>(band + 7.0, roll)));
+            let s = tileLuma(vec2<f32>(uv.x + off, uv.y), layerIndex);
+            outv = floor(shapeLuma(s) * 4.0) / 3.0;
+        }
+        case 6: { // WAVE: image rows re-drawn as waveform columns
+            let cols = 96.0;
+            let xq = (floor(uv.x * cols) + 0.5) / cols;
+            let h = tileLuma(vec2<f32>(xq, 0.25 + 0.5 * flashSeed), layerIndex);
+            let bar = step(1.0 - uv.y, h);
+            let axis = step(abs(uv.y - 0.5), 0.004);
+            outv = max(bar * step(P.threshold * 0.5, h), axis);
+        }
+        case 7: { // BARCODE: columns collapsed to vertical stripes
+            let cols = 160.0;
+            let xq = (floor(uv.x * cols) + 0.5) / cols;
+            let v = tileLuma(vec2<f32>(xq, 0.5), layerIndex);
+            outv = step(0.5, fract(v * 9.73 + xq * 3.0));
+        }
+        case 8: { // HEX: image blocks as hex digits
+            let n = clamp(floor(384.0 / max(P.blockScale, 6.0)), 8.0, 64.0);
+            let cell = floor(uv * n);
+            let cellUV = fract(uv * n);
+            let v = tileLuma((cell + 0.5) / n, layerIndex);
+            let digit = u32(clamp(v * 15.99, 0.0, 15.0));
+            // glyph occupies central 4x5 of a 6x7 cell
+            let gpos = vec2<u32>(
+                u32(clamp(floor(cellUV.x * 6.0) - 1.0, 0.0, 5.0)),
+                u32(clamp(floor(cellUV.y * 7.0) - 1.0, 0.0, 6.0))
+            );
+            let on = hexGlyph(digit, gpos);
+            // dark cells print dim digits, bright cells bright digits
+            outv = on * (0.25 + 0.75 * step(0.35, v));
+        }
+        case 9: { // BLOCKS: hard mosaic with dropout
+            let n = 24.0 + floor(tileSeed * 24.0);
+            let cell = floor(uv * n);
+            let cuv = (cell + 0.5) / n;
+            let v = shapeLuma(tileLuma(cuv, layerIndex));
+            let drop = step(0.92, hash21(cell + floor(P.time * 3.0) * 0.31 + inst));
+            outv = floor(v * 3.0) / 2.0 * (1.0 - drop);
+        }
+        default: {
+            outv = g;
+        }
+    }
+
+    // Occasional per-tile negative on fresh switches, driven by event energy.
+    let neg = step(0.85, flashSeed) * clamp(P.eventPulse * 2.0, 0.0, 1.0);
+    outv = mix(outv, 1.0 - outv, neg);
+
+    let mono = vec3<f32>(outv);
+    let outc = mix(mono, srcColor.rgb * outv, P.colorBleed);
+    return vec4<f32>(outc, 1.0);
+}
+)";
+const char* ikedaImageFlasherFragmentWGSL = ikedaImageFlasherFragmentSrc.c_str();
+
+// ==================== MOSH PASS (temporal feedback) ====================
+static const std::string ikedaFadeFragmentSrc = std::string(renderParamsWGSL) + R"(
 @group(0) @binding(0) var oldFrame : texture_2d<f32>;
 @group(0) @binding(1) var newFrame : texture_2d<f32>;
 
@@ -348,58 +259,45 @@ struct FadeParams {
     fade : f32
 }
 
-struct IkedaModeParams {
-    preprocessingMode : i32,
-    postprocessingMode : i32,
-    threshold : f32,
-    gridSize : f32,
-    dataIntensity : f32,
-    time : f32,
-    canvasWidth : f32,
-    canvasHeight : f32,
-    
-    // Mode-specific parameters
-    frequency : f32,
-    phaseShift : f32,
-    noiseLevel : f32,
-    stripWidth : f32,
-    quantumLevels : f32,
-    scanSpeed : f32,
-    matrixScale : f32,
-    pulseRate : f32
-}
-
 @group(0) @binding(2) var<uniform> fadeParam : FadeParams;
 @group(0) @binding(3) var s : sampler;
-@group(0) @binding(4) var<uniform> ikeda : IkedaModeParams;
-
-fn luminance(color: vec3<f32>) -> f32 {
-    return dot(color, vec3<f32>(0.299, 0.587, 0.114));
-}
+@group(0) @binding(4) var<uniform> P : RenderParams;
 
 @fragment
 fn fsFade(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
-    let cOld = textureSample(oldFrame, s, uv);
-    let cNew = textureSample(newFrame, s, uv);
-    let mixed = mix(cOld, cNew, fadeParam.fade);
-    
-    // Apply Ikeda preprocessing to final mixed result
-    if (ikeda.preprocessingMode == 0) {
-        return mixed;
+    let bs = max(P.moshBlock, 0.004);
+    let block = floor(uv / bs);
+    let roll = floor(P.time * 7.0); // re-roll displacement 7x/s
+
+    // Event pulses spike the mosh hard: the crawl "hitting" the frame.
+    let amt = P.moshAmount * (1.0 + P.eventPulse * 5.0);
+
+    // Broken motion vectors: some blocks fetch the old frame from elsewhere.
+    var moshUV = uv;
+    let r = hash21(block + roll * 0.117);
+    if (r < 0.5 * clamp(amt * 4.0, 0.0, 1.0)) {
+        let dir = vec2<f32>(
+            hash21(block * 1.7 + roll) - 0.5,
+            (hash21(block * 2.3 + roll) - 0.5) * 0.4
+        );
+        moshUV = uv + dir * amt * bs * 24.0;
     }
-    
-    // Black & White conversion for fade shader
-    let lum = luminance(mixed.rgb);
-    let dynamicThreshold = ikeda.threshold + sin(ikeda.time * 1.0) * 0.02;
-    let blackWhite = step(dynamicThreshold, lum);
-    
-    return vec4<f32>(blackWhite, blackWhite, blackWhite, mixed.a);
+
+    let cOld = textureSampleLevel(oldFrame, s, clamp(moshUV, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0);
+    let cNew = textureSampleLevel(newFrame, s, uv, 0.0);
+
+    // P-frame drop: a block refuses new data and decays on stale content.
+    let hold = step(hash21(block * 3.1 + roll * 0.71), P.moshDrop);
+    let f = fadeParam.fade * (1.0 - hold);
+
+    let held = cOld * P.feedbackDecay;
+    return vec4<f32>(mix(held.rgb, cNew.rgb, f), 1.0);
 }
 )";
+const char* ikedaFadeFragmentWGSL = ikedaFadeFragmentSrc.c_str();
 
-// ==================== ENHANCED PRESENT SHADER ====================
-
-const char* ikedaPresentFragmentWGSL = R"(
+// ==================== PRESENT PASS (global composition) ====================
+static const std::string ikedaPresentFragmentSrc = std::string(renderParamsWGSL) + R"(
 @group(0) @binding(0) var oldFrame : texture_2d<f32>;
 @group(0) @binding(1) var s : sampler;
 
@@ -407,125 +305,76 @@ struct ScrollParams {
     offset : vec2<f32>
 }
 
-struct IkedaModeParams {
-    preprocessingMode : i32,
-    postprocessingMode : i32,
-    threshold : f32,
-    gridSize : f32,
-    dataIntensity : f32,
-    time : f32,
-    canvasWidth : f32,
-    canvasHeight : f32,
-    
-    // Mode-specific parameters
-    frequency : f32,
-    phaseShift : f32,
-    noiseLevel : f32,
-    stripWidth : f32,
-    quantumLevels : f32,
-    scanSpeed : f32,
-    matrixScale : f32,
-    pulseRate : f32
-}
-
 @group(0) @binding(2) var<uniform> scrollParam : ScrollParams;
-@group(0) @binding(3) var<uniform> ikeda : IkedaModeParams;
-
-fn luminance(color: vec3<f32>) -> f32 {
-    return dot(color, vec3<f32>(0.299, 0.587, 0.114));
-}
+@group(0) @binding(3) var<uniform> P : RenderParams;
 
 @fragment
-fn fsPresent(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
-    let uvShifted = fract(uv + scrollParam.offset);
-    let baseColor = textureSample(oldFrame, s, uvShifted);
-    
-    if (ikeda.preprocessingMode == 0) {
-        return baseColor;
+fn fsPresent(
+    @builtin(position) fragPos : vec4<f32>,
+    @location(0) uv : vec2<f32>
+) -> @location(0) vec4<f32> {
+    var suv = fract(uv + scrollParam.offset);
+
+    // Event-driven slice glitch: horizontal strips shear on pulses.
+    let pulse = clamp(P.eventPulse, 0.0, 1.0);
+    if (pulse > 0.01) {
+        let band = floor(suv.y * 28.0);
+        let roll = floor(P.time * 18.0);
+        let sel = step(0.75, hash21(vec2<f32>(band, roll)));
+        let off = (hash21(vec2<f32>(band + 3.0, roll)) - 0.5) * 0.25 * pulse * sel;
+        suv.x = fract(suv.x + off);
     }
-    
-    // Convert to black & white
-    let lum = luminance(baseColor.rgb);
-    let blackWhite = step(ikeda.threshold, lum);
-    
-    return vec4<f32>(blackWhite, blackWhite, blackWhite, baseColor.a);
+
+    let base = textureSampleLevel(oldFrame, s, suv, 0.0);
+    var g = luma(base.rgb);
+
+    // Scanlines + rolling sync bar.
+    if (P.scanline > 0.001) {
+        let line = 0.5 + 0.5 * sin(fragPos.y * 3.14159);
+        g = g * (1.0 - P.scanline * 0.35 * line);
+        let barPos = fract(P.time * 0.11);
+        let dy = abs(uv.y - barPos);
+        g = g + P.scanline * 0.5 * exp(-dy * 220.0);       // bright leading edge
+        g = g * (1.0 - P.scanline * 0.5 * exp(-dy * 40.0) * step(uv.y, barPos)); // dark wake
+    }
+
+    // Bit noise: sparse hard white/black flips.
+    if (P.noiseAmount > 0.001) {
+        let n = hash21(fragPos.xy + fract(P.time * 977.0) * 100.0);
+        let flip = step(1.0 - P.noiseAmount * 0.12, n);
+        let val = step(0.5, hash21(fragPos.yx + P.time));
+        g = mix(g, val, flip);
+    }
+
+    // Hairline grid.
+    if (P.gridOverlay > 0.001) {
+        let cell = 96.0;
+        let gx = step(fract(fragPos.x / cell), 1.0 / cell);
+        let gy = step(fract(fragPos.y / cell), 1.0 / cell);
+        g = g + (gx + gy) * 0.10 * P.gridOverlay;
+    }
+
+    // Binary timecode strip along the bottom edge: u32 millis as cells.
+    if (P.gridOverlay > 0.001 && uv.y > 1.0 - 12.0 / max(P.canvasHeight, 1.0)) {
+        let bits = 32.0;
+        let idx = u32(clamp(floor(uv.x * bits), 0.0, bits - 1.0));
+        let t = u32(P.time * 100.0);
+        let bit = (t >> idx) & 1u;
+        let inCell = step(0.15, fract(uv.x * bits)) * step(fract(uv.x * bits), 0.85);
+        g = mix(g, f32(bit), P.gridOverlay * inCell * 0.9);
+    }
+
+    // Strobe: hard photic flicker, gated so it stays rhythmic not constant.
+    var inv = clamp(P.invert, 0.0, 1.0);
+    if (P.strobe > 0.001) {
+        let gate = step(0.5, fract(P.time * 9.0)) * step(fract(P.time * 0.618), P.strobe);
+        inv = clamp(inv + gate, 0.0, 1.0);
+    }
+    g = mix(g, 1.0 - g, inv);
+
+    let mono = vec3<f32>(clamp(g, 0.0, 1.0));
+    let outc = mix(mono, base.rgb, P.colorBleed * 0.6);
+    return vec4<f32>(outc, 1.0);
 }
 )";
-
-// ==================== DATA ANALYSIS FUNCTIONS ====================
-
-// C++ functions to extract data from images for visualization
-struct ImageAnalysisData {
-    float averageLuminance;
-    float variance;
-    float entropy;
-    std::vector<float> histogram;
-    std::vector<float> edgeMap;
-    uint32_t dominantFrequency;
-    float compressionRatio;
-};
-
-// Function to analyze image data for Ikeda visualization
-// NOTE: Commented out temporarily due to forward declaration issues
-// Will be re-implemented when ImageData struct is properly forward declared
-/*
-ImageAnalysisData analyzeImageForIkeda(const ImageData& image) {
-    ImageAnalysisData data;
-    
-    // Calculate basic statistics
-    float sum = 0.0f;
-    float sumSquared = 0.0f;
-    data.histogram.resize(256, 0.0f);
-    
-    for (size_t i = 0; i < image.pixels.size(); i += 4) {
-        uint8_t r = image.pixels[i];
-        uint8_t g = image.pixels[i + 1];
-        uint8_t b = image.pixels[i + 2];
-        
-        // Convert to luminance
-        float lum = 0.299f * r + 0.587f * g + 0.114f * b;
-        sum += lum;
-        sumSquared += lum * lum;
-        
-        // Build histogram
-        int bin = static_cast<int>(lum);
-        if (bin >= 0 && bin < 256) {
-            data.histogram[bin] += 1.0f;
-        }
-    }
-    
-    float pixelCount = static_cast<float>(image.pixels.size() / 4);
-    data.averageLuminance = sum / pixelCount;
-    data.variance = (sumSquared / pixelCount) - (data.averageLuminance * data.averageLuminance);
-    
-    // Normalize histogram
-    for (auto& bin : data.histogram) {
-        bin /= pixelCount;
-    }
-    
-    // Calculate entropy
-    data.entropy = 0.0f;
-    for (const auto& bin : data.histogram) {
-        if (bin > 0.0f) {
-            data.entropy -= bin * std::log2(bin);
-        }
-    }
-    
-    // Estimate compression ratio (simplified)
-    data.compressionRatio = data.entropy / 8.0f; // Rough estimate
-    
-    return data;
-}
-*/
-
-// Export functions for JavaScript control
-extern "C" {
-    EMSCRIPTEN_KEEPALIVE void setPreprocessingMode(int mode);
-    EMSCRIPTEN_KEEPALIVE void setPostprocessingMode(int mode);
-    EMSCRIPTEN_KEEPALIVE void setIkedaThreshold(float threshold);
-    EMSCRIPTEN_KEEPALIVE void setIkedaGridSize(float gridSize);
-    EMSCRIPTEN_KEEPALIVE void setIkedaDataIntensity(float intensity);
-    EMSCRIPTEN_KEEPALIVE float getImageAverageLuminance();
-    EMSCRIPTEN_KEEPALIVE float getImageEntropy();
-    EMSCRIPTEN_KEEPALIVE float getImageVariance();
-}
+const char* ikedaPresentFragmentWGSL = ikedaPresentFragmentSrc.c_str();

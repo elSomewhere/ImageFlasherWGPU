@@ -3,733 +3,429 @@
 <head>
   <link rel="icon" href="data:,">
   <meta charset="UTF-8">
-  <title>Data.Matrix - Ikeda Information Overload</title>
+  <title>DATAVALANCHE</title>
   <style>
-    /* Ryoji Ikeda inspired minimalist aesthetic */
+    /* Stark monochrome. The image wall is the interface; controls stay hidden. */
     html, body {
       margin: 0;
       padding: 0;
-      background-color: #000000;
-      color: #FFFFFF;
-      font-family: "Courier New", "Monaco", "Lucida Console", monospace;
+      background: #000;
+      color: #fff;
+      font-family: "SF Mono", "Menlo", "Courier New", monospace;
+      font-size: 10px;
+      line-height: 1.4;
       overflow: hidden;
-      font-size: 10px;
-      line-height: 1.2;
+      -webkit-font-smoothing: none;
     }
 
-    /* Control panel - minimal and data-focused */
-    #controls {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      background: rgba(0, 0, 0, 0.9);
-      border: 1px solid #FFFFFF;
-      padding: 8px;
-      z-index: 10;
-      width: 300px;
-      font-size: 9px;
-      max-height: 90vh;
-      overflow-y: auto;
-    }
-
-    /* Header styling */
-    .control-header {
-      font-size: 11px;
-      font-weight: bold;
-      margin-bottom: 8px;
-      text-align: center;
-      border-bottom: 1px solid #FFFFFF;
-      padding-bottom: 4px;
-    }
-
-    /* Section headers */
-    .section-header {
-      font-size: 10px;
-      font-weight: bold;
-      margin: 8px 0 4px 0;
-      color: #FFFFFF;
-      text-transform: uppercase;
-      border-bottom: 1px solid #333;
-      padding-bottom: 2px;
-    }
-
-    /* Control rows */
-    .control-row {
-      margin-bottom: 6px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .control-row label {
-      width: 120px;
-      font-size: 9px;
-    }
-
-    .control-row input[type="range"] {
-      width: 80px;
-      height: 12px;
-      background: #000000;
-      border: 1px solid #FFFFFF;
-      -webkit-appearance: none;
-      appearance: none;
-    }
-
-    .crawler-input {
-      width: 165px;
-      background: #000000;
-      color: #FFFFFF;
-      border: 1px solid #FFFFFF;
-      font-size: 9px;
-      font-family: inherit;
-      padding: 3px;
-    }
-
-    .crawler-status {
-      color: #999999;
-      font-size: 8px;
-      line-height: 1.3;
-      margin-top: 4px;
-      min-height: 28px;
-      word-break: break-word;
-    }
-
-    .crawler-log {
-      margin-top: 6px;
-      max-height: 110px;
-      overflow-y: auto;
-      border: 1px solid #333333;
-      padding: 4px;
-      background: #000000;
-      color: #BBBBBB;
-      font-size: 8px;
-      line-height: 1.3;
-      word-break: break-word;
-    }
-
-    .crawler-log-entry {
-      margin-bottom: 3px;
-      border-bottom: 1px solid #111111;
-      padding-bottom: 2px;
-    }
-
-    .crawler-log-entry strong {
-      color: #FFFFFF;
-    }
-
-    .control-row input[type="range"]::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      appearance: none;
-      width: 8px;
-      height: 12px;
-      background: #FFFFFF;
-      cursor: pointer;
-    }
-
-    .control-row input[type="range"]::-moz-range-thumb {
-      width: 8px;
-      height: 12px;
-      background: #FFFFFF;
-      cursor: pointer;
-      border: none;
-    }
-
-    /* Select styling */
-    .control-row select {
-      width: 85px;
-      background: #000000;
-      color: #FFFFFF;
-      border: 1px solid #FFFFFF;
-      font-size: 9px;
-      font-family: inherit;
-    }
-
-    /* Value display */
-    .value-display {
-      width: 40px;
-      text-align: right;
-      font-size: 8px;
-      font-family: inherit;
-    }
-
-    /* Button styling */
-    button {
-      background: #000000;
-      color: #FFFFFF;
-      border: 1px solid #FFFFFF;
-      padding: 4px 8px;
-      font-size: 9px;
-      font-family: inherit;
-      cursor: pointer;
-      margin: 2px;
-    }
-
-    button:hover {
-      background: #FFFFFF;
-      color: #000000;
-    }
-
-    /* Mode-specific controls - initially hidden */
-    .mode-controls {
-      display: none;
-      margin-top: 4px;
-      padding: 4px;
-      border: 1px solid #333;
-    }
-
-    .mode-controls.active {
-      display: block;
-    }
-
-    /* Data display area */
-    #dataDisplay {
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      background: rgba(0, 0, 0, 0.9);
-      border: 1px solid #FFFFFF;
-      padding: 8px;
-      z-index: 10;
-      width: 200px;
-      font-size: 8px;
-      max-height: 300px;
-      overflow-y: auto;
-    }
-
-    .data-row {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 2px;
-    }
-
-    .data-label {
-      color: #FFFFFF;
-    }
-
-    .data-value {
-      color: #FFFFFF;
-      font-weight: bold;
-    }
-
-    /* Status bar */
-    #statusBar {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      height: 20px;
-      background: rgba(0, 0, 0, 0.9);
-      border-top: 1px solid #FFFFFF;
-      display: flex;
-      align-items: center;
-      padding: 0 10px;
-      font-size: 8px;
-      z-index: 10;
-    }
-
-    /* Canvas styling */
     #canvas {
       width: 100vw;
       height: 100vh;
       display: block;
-      background-color: #000000;
+      background: #000;
+      cursor: none;
     }
 
-    /* Keyboard shortcuts display */
-    #shortcuts {
+    /* ---- status strip (always on, minimal) ---- */
+    #hud {
       position: absolute;
-      bottom: 25px;
-      left: 10px;
-      background: rgba(0, 0, 0, 0.9);
-      border: 1px solid #FFFFFF;
-      padding: 8px;
-      z-index: 10;
-      font-size: 8px;
-      width: 220px;
-    }
-
-    .shortcut-row {
+      left: 0;
+      right: 0;
+      bottom: 0;
       display: flex;
-      justify-content: space-between;
-      margin-bottom: 2px;
+      gap: 14px;
+      padding: 3px 8px;
+      font-size: 9px;
+      letter-spacing: 0.05em;
+      color: #888;
+      background: rgba(0, 0, 0, 0.75);
+      border-top: 1px solid #222;
+      z-index: 20;
+      pointer-events: none;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    #hud b { color: #fff; font-weight: normal; }
+
+    #hint {
+      position: absolute;
+      right: 8px;
+      bottom: 18px;
+      font-size: 9px;
+      color: #444;
+      z-index: 20;
+      pointer-events: none;
     }
 
-    /* Mode indicator */
-    #modeIndicator {
+    /* ---- scene flash (center, on cuts) ---- */
+    #sceneFlash {
       position: absolute;
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
-      font-size: 24px;
-      font-weight: bold;
-      color: #FFFFFF;
-      z-index: 15;
+      font-size: 20px;
+      letter-spacing: 0.35em;
+      color: #fff;
+      z-index: 25;
       opacity: 0;
       pointer-events: none;
-      transition: opacity 0.3s;
     }
-
-    /* Flashing animation for mode changes */
-    .mode-flash {
-      opacity: 1 !important;
-      animation: flash 1s ease-out;
+    #sceneFlash.on {
+      animation: sceneflash 0.9s steps(6, end);
     }
-
-    @keyframes flash {
+    @keyframes sceneflash {
       0% { opacity: 1; }
       100% { opacity: 0; }
     }
 
-    /* Scrollbar styling for webkit browsers */
-    #controls::-webkit-scrollbar {
+    /* ---- control panel (hidden by default; H toggles) ---- */
+    #panel {
+      position: absolute;
+      top: 0;
+      right: 0;
+      bottom: 20px;
+      width: 268px;
+      background: rgba(0, 0, 0, 0.92);
+      border-left: 1px solid #333;
+      padding: 10px;
+      overflow-y: auto;
+      z-index: 30;
+      display: none;
+    }
+    #panel.open { display: block; }
+
+    #panel h1 {
+      font-size: 11px;
+      font-weight: normal;
+      letter-spacing: 0.3em;
+      margin: 0 0 10px 0;
+      padding-bottom: 6px;
+      border-bottom: 1px solid #fff;
+    }
+    #panel h2 {
+      font-size: 9px;
+      font-weight: normal;
+      letter-spacing: 0.2em;
+      color: #aaa;
+      text-transform: uppercase;
+      margin: 12px 0 4px 0;
+      padding-bottom: 2px;
+      border-bottom: 1px solid #222;
+    }
+
+    .row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin: 3px 0;
+      gap: 6px;
+    }
+    .row label {
+      flex: 0 0 88px;
+      color: #999;
+      font-size: 9px;
+    }
+    .row .v {
+      flex: 0 0 34px;
+      text-align: right;
+      font-size: 9px;
+      color: #fff;
+    }
+
+    input[type="range"] {
+      flex: 1;
+      height: 10px;
+      background: #000;
+      border: 1px solid #333;
+      -webkit-appearance: none;
+      appearance: none;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
       width: 6px;
+      height: 10px;
+      background: #fff;
+      cursor: pointer;
+    }
+    input[type="range"]::-moz-range-thumb {
+      width: 6px;
+      height: 10px;
+      background: #fff;
+      border: none;
+      cursor: pointer;
     }
 
-    #controls::-webkit-scrollbar-track {
-      background: #000000;
+    select, input[type="text"], input[type="url"] {
+      flex: 1;
+      background: #000;
+      color: #fff;
+      border: 1px solid #333;
+      font-family: inherit;
+      font-size: 9px;
+      padding: 2px 3px;
     }
+    input[type="checkbox"] { accent-color: #fff; }
 
-    #controls::-webkit-scrollbar-thumb {
-      background: #FFFFFF;
-      border: 1px solid #000000;
+    button {
+      background: #000;
+      color: #fff;
+      border: 1px solid #444;
+      font-family: inherit;
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      padding: 3px 8px;
+      cursor: pointer;
+      margin: 2px 2px 2px 0;
     }
+    button:hover { background: #fff; color: #000; }
+    button.active { background: #fff; color: #000; }
+
+    .log {
+      margin-top: 5px;
+      max-height: 90px;
+      overflow-y: auto;
+      border: 1px solid #1a1a1a;
+      padding: 4px;
+      font-size: 8px;
+      color: #777;
+      word-break: break-word;
+    }
+    .log b { color: #ccc; font-weight: normal; }
+
+    #panel::-webkit-scrollbar { width: 4px; }
+    #panel::-webkit-scrollbar-track { background: #000; }
+    #panel::-webkit-scrollbar-thumb { background: #333; }
   </style>
 </head>
 <body>
 
-<div id="controls">
-  <div class="control-header">DATA.MATRIX.EXTENDED</div>
-  
-  <!-- Preprocessing Section -->
-  <div class="section-header">Preprocessing</div>
-  <div class="control-row">
-    <label>Color Mode:</label>
-    <select id="preprocessingMode">
-      <option value="0">COLOR</option>
-      <option value="1" selected>BLACK/WHITE</option>
-    </select>
+<canvas id="canvas"></canvas>
+
+<div id="sceneFlash"></div>
+
+<div id="hud">
+  <span><b id="connectionStatus">CONNECTING</b></span>
+  <span>SCENE <b id="sceneLabel">--</b></span>
+  <span>SND <b id="audioLabel">OFF</b></span>
+  <span>RX <b id="receivedCounter">0</b></span>
+  <span>DEC <b id="decodedCounter">0</b></span>
+  <span>GPU <b id="uploadedCounter">0</b></span>
+  <span>SHOWN <b id="presentedCounter">0</b></span>
+  <span>BUF <b id="bufferUsageLabel">--</b></span>
+  <span>CRAWL <b id="crawlerStatusLabel">--</b></span>
+</div>
+
+<div id="hint">H&nbsp;PANEL&nbsp;&middot;&nbsp;A&nbsp;SOUND&nbsp;&middot;&nbsp;SPACE&nbsp;CUT</div>
+
+<div id="panel">
+  <h1>DATAVALANCHE</h1>
+
+  <h2>Conductor</h2>
+  <div class="row">
+    <label>Auto evolve</label>
+    <input type="checkbox" id="autoMode" checked>
+    <span class="v" id="autoModeVal">ON</span>
+  </div>
+  <div class="row">
+    <label>Scene</label>
+    <select id="sceneSelect"></select>
+  </div>
+  <div class="row">
+    <button id="nextScene">CUT &gt;</button>
+    <button id="pulseBtn">PULSE</button>
   </div>
 
-  <div class="control-row" id="thresholdRow">
-    <label>Threshold:</label>
-    <input type="range" id="ikedaThreshold" min="0" max="1" step="0.01" value="0.5">
-    <span id="thresholdValue" class="value-display">0.50</span>
+  <h2>Audio</h2>
+  <div class="row">
+    <button id="audioToggle">SOUND ON</button>
+  </div>
+  <div class="row">
+    <label>Level</label>
+    <input type="range" id="audioLevel" min="0" max="1" step="0.01" value="0.6">
+    <span class="v" id="audioLevelVal">0.60</span>
+  </div>
+  <div class="row">
+    <label>Density</label>
+    <input type="range" id="audioDensity" min="0" max="1" step="0.01" value="0.5">
+    <span class="v" id="audioDensityVal">0.50</span>
   </div>
 
-  <!-- Color Mode Controls (only visible in COLOR mode) -->
-  <div class="mode-controls" id="colorControls">
-    <div class="control-row">
-      <label>Color Intensity:</label>
-      <input type="range" id="colorIntensity" min="0" max="2" step="0.01" value="1.0">
-      <span id="colorIntensityValue" class="value-display">1.00</span>
-    </div>
+  <h2>Material</h2>
+  <div class="row">
+    <label>Style A</label>
+    <select id="styleA"></select>
+  </div>
+  <div class="row">
+    <label>Style B</label>
+    <select id="styleB"></select>
+  </div>
+  <div class="row">
+    <label>B fraction</label>
+    <input type="range" id="styleMix" min="0" max="1" step="0.01" value="0.15">
+    <span class="v" id="styleMixVal">0.15</span>
   </div>
 
-  <!-- Postprocessing Mode Selection -->
-  <div class="section-header">Postprocessing Mode</div>
-  <div class="control-row">
-    <label>Mode:</label>
-    <select id="postprocessingMode">
-      <option value="0">NONE</option>
-      <option value="1">GRID</option>
-      <option value="2" selected>DATA</option>
-      <option value="3">BINARY</option>
-      <option value="4">FREQUENCY</option>
-      <option value="5">SCAN</option>
-      <option value="6">MATRIX</option>
-      <option value="7">PULSE</option>
-      <option value="8">NOISE</option>
-      <option value="9">STRIP</option>
-      <option value="10">PHASE</option>
-      <option value="11">QUANTUM</option>
-    </select>
+  <h2>Tone</h2>
+  <div class="row">
+    <label>Threshold</label>
+    <input type="range" id="threshold" min="0" max="1" step="0.01" value="0.5">
+    <span class="v" id="thresholdVal">0.50</span>
+  </div>
+  <div class="row">
+    <label>Contrast</label>
+    <input type="range" id="contrast" min="0.1" max="4" step="0.05" value="1.4">
+    <span class="v" id="contrastVal">1.40</span>
+  </div>
+  <div class="row">
+    <label>Jitter</label>
+    <input type="range" id="jitter" min="0" max="1" step="0.01" value="0.3">
+    <span class="v" id="jitterVal">0.30</span>
+  </div>
+  <div class="row">
+    <label>Color bleed</label>
+    <input type="range" id="colorBleed" min="0" max="1" step="0.01" value="0">
+    <span class="v" id="colorBleedVal">0.00</span>
   </div>
 
-  <!-- Mode-Specific Controls -->
-  <div class="section-header">Mode Parameters</div>
-  
-  <!-- None Mode - No Controls -->
-  <div class="mode-controls" id="noneControls">
-    <div style="text-align: center; color: #666; font-style: italic;">
-      No parameters available for this mode
-    </div>
+  <h2>Structure</h2>
+  <div class="row">
+    <label>Dither px</label>
+    <input type="range" id="dither" min="1" max="16" step="1" value="3">
+    <span class="v" id="ditherVal">3</span>
+  </div>
+  <div class="row">
+    <label>Glyph px</label>
+    <input type="range" id="blockScale" min="6" max="48" step="1" value="14">
+    <span class="v" id="blockScaleVal">14</span>
+  </div>
+  <div class="row">
+    <label>Slice amp</label>
+    <input type="range" id="sliceAmp" min="0" max="1" step="0.01" value="0.15">
+    <span class="v" id="sliceAmpVal">0.15</span>
+  </div>
+  <div class="row">
+    <label>Grid/HUD</label>
+    <input type="range" id="grid" min="0" max="1" step="0.01" value="0.5">
+    <span class="v" id="gridVal">0.50</span>
   </div>
 
-  <!-- Grid Mode Controls -->
-  <div class="mode-controls" id="gridControls">
-    <div class="control-row">
-      <label>Grid Size:</label>
-      <input type="range" id="gridSize" min="8" max="128" step="8" value="32">
-      <span id="gridSizeValue" class="value-display">32</span>
-    </div>
-    <div class="control-row">
-      <label>Grid Lines:</label>
-      <input type="range" id="gridLines" min="4" max="64" step="4" value="16">
-      <span id="gridLinesValue" class="value-display">16</span>
-    </div>
+  <h2>Mosh</h2>
+  <div class="row">
+    <label>Amount</label>
+    <input type="range" id="moshAmount" min="0" max="1" step="0.01" value="0.25">
+    <span class="v" id="moshAmountVal">0.25</span>
+  </div>
+  <div class="row">
+    <label>Block</label>
+    <input type="range" id="moshBlock" min="0.004" max="0.25" step="0.002" value="0.035">
+    <span class="v" id="moshBlockVal">0.035</span>
+  </div>
+  <div class="row">
+    <label>P-drop</label>
+    <input type="range" id="moshDrop" min="0" max="1" step="0.01" value="0.15">
+    <span class="v" id="moshDropVal">0.15</span>
+  </div>
+  <div class="row">
+    <label>Decay</label>
+    <input type="range" id="moshDecay" min="0.5" max="1" step="0.005" value="0.97">
+    <span class="v" id="moshDecayVal">0.97</span>
   </div>
 
-  <!-- Data Mode Controls -->
-  <div class="mode-controls active" id="dataControls">
-    <div class="control-row">
-      <label>Data Intensity:</label>
-      <input type="range" id="dataIntensity" min="0" max="1" step="0.01" value="0.5">
-      <span id="dataIntensityValue" class="value-display">0.50</span>
-    </div>
-    <div class="control-row">
-      <label>Data Overlay:</label>
-      <input type="range" id="dataOverlay" min="0" max="1" step="0.01" value="0.7">
-      <span id="dataOverlayValue" class="value-display">0.70</span>
-    </div>
+  <h2>Temporal</h2>
+  <div class="row">
+    <label>Scanline</label>
+    <input type="range" id="scanline" min="0" max="1" step="0.01" value="0.35">
+    <span class="v" id="scanlineVal">0.35</span>
+  </div>
+  <div class="row">
+    <label>Bit noise</label>
+    <input type="range" id="noise" min="0" max="1" step="0.01" value="0.08">
+    <span class="v" id="noiseVal">0.08</span>
+  </div>
+  <div class="row">
+    <label>Strobe</label>
+    <input type="range" id="strobe" min="0" max="1" step="0.01" value="0">
+    <span class="v" id="strobeVal">0.00</span>
+  </div>
+  <div class="row">
+    <label>Invert</label>
+    <input type="range" id="invert" min="0" max="1" step="0.01" value="0">
+    <span class="v" id="invertVal">0.00</span>
   </div>
 
-  <!-- Binary Mode Controls -->
-  <div class="mode-controls" id="binaryControls">
-    <div class="control-row">
-      <label>Binary Cutoff:</label>
-      <input type="range" id="binaryCutoff" min="0" max="1" step="0.01" value="0.5">
-      <span id="binaryCutoffValue" class="value-display">0.50</span>
-    </div>
+  <h2>Flow</h2>
+  <div class="row">
+    <label>Fade</label>
+    <input type="range" id="fade" min="0" max="1" step="0.01" value="0.5">
+    <span class="v" id="fadeVal">0.50</span>
+  </div>
+  <div class="row">
+    <label>Switch s</label>
+    <input type="range" id="switchInterval" min="0.01" max="2" step="0.01" value="0.33">
+    <span class="v" id="switchIntervalVal">0.33</span>
+  </div>
+  <div class="row">
+    <label>Tile 2^n</label>
+    <input type="range" id="tileFactor" min="0" max="6" step="1" value="3">
+    <span class="v" id="tileFactorVal">3</span>
+  </div>
+  <div class="row">
+    <label>Tile frac</label>
+    <input type="range" id="tileFraction" min="0" max="1" step="0.01" value="0.5">
+    <span class="v" id="tileFractionVal">0.50</span>
+  </div>
+  <div class="row">
+    <label>Scroll X</label>
+    <input type="range" id="scrollX" min="-0.5" max="0.5" step="0.005" value="0.06">
+    <span class="v" id="scrollXVal">0.06</span>
+  </div>
+  <div class="row">
+    <label>Scroll Y</label>
+    <input type="range" id="scrollY" min="-0.5" max="0.5" step="0.005" value="0">
+    <span class="v" id="scrollYVal">0.00</span>
+  </div>
+  <div class="row">
+    <label>Uploads/f</label>
+    <input type="range" id="uploads" min="0" max="10" step="1" value="0">
+    <span class="v" id="uploadsVal">0</span>
   </div>
 
-  <!-- Frequency Mode Controls -->
-  <div class="mode-controls" id="frequencyControls">
-    <div class="control-row">
-      <label>Frequency:</label>
-      <input type="range" id="ikedaFrequency" min="1" max="10" step="0.1" value="3">
-      <span id="frequencyValue" class="value-display">3.0</span>
-    </div>
-    <div class="control-row">
-      <label>Data Intensity:</label>
-      <input type="range" id="frequencyDataIntensity" min="0" max="1" step="0.01" value="0.5">
-      <span id="frequencyDataIntensityValue" class="value-display">0.50</span>
-    </div>
+  <h2>Crawler steering</h2>
+  <div class="row">
+    <label>Keywords</label>
+    <input type="text" id="crawlerKeywords" placeholder="architecture, cats">
   </div>
-
-  <!-- Scan Mode Controls -->
-  <div class="mode-controls" id="scanControls">
-    <div class="control-row">
-      <label>Scan Speed:</label>
-      <input type="range" id="ikedaScanSpeed" min="0.1" max="2" step="0.1" value="0.5">
-      <span id="scanSpeedValue" class="value-display">0.5</span>
-    </div>
-    <div class="control-row">
-      <label>Grid Size:</label>
-      <input type="range" id="scanGridSize" min="8" max="128" step="8" value="32">
-      <span id="scanGridSizeValue" class="value-display">32</span>
-    </div>
+  <div class="row">
+    <label>Seed URL</label>
+    <input type="url" id="crawlerSeed" placeholder="https://example.com">
   </div>
-
-  <!-- Matrix Mode Controls -->
-  <div class="mode-controls" id="matrixControls">
-    <div class="control-row">
-      <label>Matrix Scale:</label>
-      <input type="range" id="ikedaMatrixScale" min="0.5" max="3" step="0.1" value="1">
-      <span id="matrixScaleValue" class="value-display">1.0</span>
-    </div>
-    <div class="control-row">
-      <label>Grid Size:</label>
-      <input type="range" id="matrixGridSize" min="8" max="128" step="8" value="32">
-      <span id="matrixGridSizeValue" class="value-display">32</span>
-    </div>
-  </div>
-
-  <!-- Pulse Mode Controls -->
-  <div class="mode-controls" id="pulseControls">
-    <div class="control-row">
-      <label>Pulse Rate:</label>
-      <input type="range" id="ikedaPulseRate" min="0.5" max="5" step="0.1" value="2">
-      <span id="pulseRateValue" class="value-display">2.0</span>
-    </div>
-    <div class="control-row">
-      <label>Data Intensity:</label>
-      <input type="range" id="pulseDataIntensity" min="0" max="1" step="0.01" value="0.5">
-      <span id="pulseDataIntensityValue" class="value-display">0.50</span>
-    </div>
-  </div>
-
-  <!-- Noise Mode Controls -->
-  <div class="mode-controls" id="noiseControls">
-    <div class="control-row">
-      <label>Noise Level:</label>
-      <input type="range" id="ikedaNoiseLevel" min="0" max="1" step="0.01" value="0.5">
-      <span id="noiseLevelValue" class="value-display">0.50</span>
-    </div>
-    <div class="control-row">
-      <label>Grid Size:</label>
-      <input type="range" id="noiseGridSize" min="8" max="128" step="8" value="32">
-      <span id="noiseGridSizeValue" class="value-display">32</span>
-    </div>
-  </div>
-
-  <!-- Strip Mode Controls -->
-  <div class="mode-controls" id="stripControls">
-    <div class="control-row">
-      <label>Strip Width:</label>
-      <input type="range" id="ikedaStripWidth" min="0.01" max="0.2" step="0.01" value="0.05">
-      <span id="stripWidthValue" class="value-display">0.05</span>
-    </div>
-  </div>
-
-  <!-- Phase Mode Controls -->
-  <div class="mode-controls" id="phaseControls">
-    <div class="control-row">
-      <label>Phase Shift:</label>
-      <input type="range" id="ikedaPhaseShift" min="0" max="6.28" step="0.1" value="1.57">
-      <span id="phaseShiftValue" class="value-display">1.57</span>
-    </div>
-    <div class="control-row">
-      <label>Data Intensity:</label>
-      <input type="range" id="phaseDataIntensity" min="0" max="1" step="0.01" value="0.5">
-      <span id="phaseDataIntensityValue" class="value-display">0.50</span>
-    </div>
-  </div>
-
-  <!-- Quantum Mode Controls -->
-  <div class="mode-controls" id="quantumControls">
-    <div class="control-row">
-      <label>Quantum Levels:</label>
-      <input type="range" id="ikedaQuantumLevels" min="2" max="16" step="1" value="8">
-      <span id="quantumLevelsValue" class="value-display">8</span>
-    </div>
-    <div class="control-row">
-      <label>Grid Size:</label>
-      <input type="range" id="quantumGridSize" min="8" max="128" step="8" value="32">
-      <span id="quantumGridSizeValue" class="value-display">32</span>
-    </div>
-  </div>
-
-  <!-- Original Controls -->
-  <div class="section-header">Animation</div>
-  <div class="control-row">
-    <label>Fade Factor:</label>
-    <input type="range" id="fadeSlider" min="0" max="1" step="0.01" value="0.5">
-    <span id="fadeValue" class="value-display">0.50</span>
-  </div>
-
-  <div class="control-row">
-    <label>Switch Interval:</label>
-    <input type="range" id="switchSlider" min="0.0001" max="1" step="0.0001" value="0.33">
-    <span id="switchValue" class="value-display">0.33</span>
-  </div>
-
-  <div class="control-row">
-    <label>Tile Factor:</label>
-    <input type="range" id="tileSlider" min="1" max="10" step="1" value="3">
-    <span id="tileValue" class="value-display">3</span>
-  </div>
-
-  <!-- Web Crawler Controls -->
-  <div class="section-header">Crawler Steering</div>
-  <div class="control-row">
-    <label>Keywords:</label>
-    <input class="crawler-input" id="crawlerKeywords" type="text" placeholder="architecture, cats">
-  </div>
-  <div class="control-row">
-    <label>Seed URL:</label>
-    <input class="crawler-input" id="crawlerSeed" type="url" placeholder="https://example.com">
-  </div>
-  <div class="control-row">
-    <label>Exploration:</label>
+  <div class="row">
+    <label>Exploration</label>
     <input type="range" id="crawlerExploration" min="0" max="1" step="0.01" value="0.55">
-    <span id="crawlerExplorationValue" class="value-display">0.55</span>
+    <span class="v" id="crawlerExplorationValue">0.55</span>
   </div>
-  <div class="control-row">
-    <label>Autopilot:</label>
+  <div class="row">
+    <label>Autopilot</label>
     <input type="checkbox" id="crawlerAutopilot" checked>
   </div>
-  <div class="control-row">
-    <label>Content:</label>
+  <div class="row">
+    <label>Content</label>
     <select id="crawlerContentPolicy">
       <option value="broad" selected>Broad web</option>
       <option value="open-license">Open license</option>
     </select>
   </div>
-  <div style="text-align: center;">
-    <button id="applyCrawlerKeywords">Set Keywords</button>
-    <button id="addCrawlerSeed">Add Seed</button>
+  <div class="row">
+    <button id="applyCrawlerKeywords">SET KEYWORDS</button>
+    <button id="addCrawlerSeed">ADD SEED</button>
   </div>
-  <div id="crawlerStatus" class="crawler-status">Crawler: inactive</div>
-  <div id="crawlerLog" class="crawler-log">Crawler log: waiting for state...</div>
-  <div id="artifactProvenance" class="crawler-log">Artifact provenance: waiting...</div>
-
-  <!-- System Controls -->
-  <div class="section-header">System</div>
-  <div class="control-row">
-    <label>Max Uploads/frame:</label>
-    <input type="range" id="uploadsSlider" min="0" max="10" step="1" value="0">
-    <span id="uploadsValue" class="value-display">0</span>
-  </div>
-
-  <!-- Scrolling Controls -->
-  <div class="section-header">Motion</div>
-  <div class="control-row">
-    <label>Scroll Speed X:</label>
-    <input type="range" id="scrollSpeedX" min="-1" max="1" step="0.01" value="0.1">
-    <span id="scrollSpeedXVal" class="value-display">0.10</span>
-  </div>
-
-  <div class="control-row">
-    <label>Scroll Speed Y:</label>
-    <input type="range" id="scrollSpeedY" min="-1" max="1" step="0.01" value="0.00">
-    <span id="scrollSpeedYVal" class="value-display">0.00</span>
-  </div>
-
-  <div class="control-row">
-    <label>Scroll Offset X:</label>
-    <input type="range" id="scrollOffsetX" min="-1" max="1" step="0.01" value="0.10">
-    <span id="scrollOffsetXVal" class="value-display">0.10</span>
-  </div>
-
-  <div class="control-row">
-    <label>Scroll Offset Y:</label>
-    <input type="range" id="scrollOffsetY" min="-1" max="1" step="0.01" value="0.00">
-    <span id="scrollOffsetYVal" class="value-display">0.00</span>
-  </div>
-
-  <!-- Action Buttons -->
-  <div class="section-header">Actions</div>
-  <div style="text-align: center;">
-    <button id="updateBufferUsage">Update Buffer</button>
-    <button id="resetSystem">Reset All</button>
-  </div>
+  <div id="crawlerStatus" class="log">Crawler: inactive</div>
+  <div id="crawlerLog" class="log">Crawler log: waiting for state...</div>
+  <div id="artifactProvenance" class="log">Artifact provenance: waiting...</div>
 </div>
 
-<!-- Real-time Data Display -->
-<div id="dataDisplay">
-  <div class="control-header">Live Analysis</div>
-  
-  <div class="data-row">
-    <span class="data-label">Luminance:</span>
-    <span id="dataLuminance" class="data-value">--</span>
-  </div>
-  
-  <div class="data-row">
-    <span class="data-label">Entropy:</span>
-    <span id="dataEntropy" class="data-value">--</span>
-  </div>
-  
-  <div class="data-row">
-    <span class="data-label">Variance:</span>
-    <span id="dataVariance" class="data-value">--</span>
-  </div>
-  
-  <div class="data-row">
-    <span class="data-label">Edge Density:</span>
-    <span id="dataEdgeDensity" class="data-value">--</span>
-  </div>
-  
-  <div class="data-row">
-    <span class="data-label">Freq Ratio:</span>
-    <span id="dataFreqRatio" class="data-value">--</span>
-  </div>
-  
-  <div class="data-row">
-    <span class="data-label">Compression:</span>
-    <span id="dataCompression" class="data-value">--</span>
-  </div>
-  
-  <div class="data-row">
-    <span class="data-label">Timestamp:</span>
-    <span id="dataTimestamp" class="data-value">--</span>
-  </div>
-</div>
-
-<!-- Status Bar -->
-<div id="statusBar">
-  <span id="connectionStatus">CONNECTING...</span>
-  <span style="margin-left: 20px;">FPS: <span id="fpsCounter">--</span></span>
-  <span style="margin-left: 20px;">Images: <span id="imageCounter">0</span></span>
-  <span style="margin-left: 12px;">Rx:<span id="receivedCounter">0</span></span>
-  <span style="margin-left: 8px;">Dec:<span id="decodedCounter">0</span></span>
-  <span style="margin-left: 8px;">GPU:<span id="uploadedCounter">0</span></span>
-  <span style="margin-left: 8px;">Shown:<span id="presentedCounter">0</span></span>
-  <span style="margin-left: 20px;">Pre: <span id="currentPreprocessing">BLACK/WHITE</span></span>
-  <span style="margin-left: 15px;">Post: <span id="currentPostprocessing">DATA</span></span>
-  <span style="margin-left: 15px;"><span id="bufferUsageLabel">Buffer: --</span></span>
-  <span style="margin-left: 15px;">Crawler: <span id="crawlerStatusLabel">--</span></span>
-</div>
-
-<!-- Keyboard Shortcuts -->
-<div id="shortcuts">
-  <div class="control-header">Keyboard Shortcuts</div>
-  
-  <div class="shortcut-row">
-    <span>1-9, 0:</span>
-    <span>Post Modes</span>
-  </div>
-  
-  <div class="shortcut-row">
-    <span>C:</span>
-    <span>Toggle Color/B&W</span>
-  </div>
-  
-  <div class="shortcut-row">
-    <span>G:</span>
-    <span>Grid Mode</span>
-  </div>
-  
-  <div class="shortcut-row">
-    <span>D:</span>
-    <span>Data Mode</span>
-  </div>
-  
-  <div class="shortcut-row">
-    <span>B:</span>
-    <span>Binary Mode</span>
-  </div>
-  
-  <div class="shortcut-row">
-    <span>F:</span>
-    <span>Frequency Mode</span>
-  </div>
-  
-  <div class="shortcut-row">
-    <span>S:</span>
-    <span>Scan Mode</span>
-  </div>
-  
-  <div class="shortcut-row">
-    <span>M:</span>
-    <span>Matrix Mode</span>
-  </div>
-  
-  <div class="shortcut-row">
-    <span>P:</span>
-    <span>Pulse Mode</span>
-  </div>
-  
-  <div class="shortcut-row">
-    <span>N:</span>
-    <span>Noise Mode</span>
-  </div>
-  
-  <div class="shortcut-row">
-    <span>T:</span>
-    <span>Toggle Threshold</span>
-  </div>
-  
-  <div class="shortcut-row">
-    <span>R:</span>
-    <span>Reset Defaults</span>
-  </div>
-  
-  <div class="shortcut-row">
-    <span>ESC:</span>
-    <span>Fullscreen</span>
-  </div>
-</div>
-
-<!-- Mode Indicator -->
-<div id="modeIndicator">DATA</div>
-
-<!-- WebGPU Canvas -->
-<canvas id="canvas"></canvas>
-
-<!-- Load the Emscripten-generated JavaScript first -->
 <script src="index.js"></script>
-
-<!-- Then load the Ikeda control system -->
 <script src="app.js"></script>
 
 </body>

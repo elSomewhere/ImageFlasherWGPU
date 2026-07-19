@@ -2282,9 +2282,9 @@ var readEmAsmArgs = (sigPtr, buf) => {
     wide &= (ch != 112);
     buf += wide && (buf % 8) ? 4 : 0;
     readEmAsmArgsArray.push(// Special case for pointers under wasm64 or CAN_ADDRESS_2GB mode.
-    ch == 112 ? (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((buf) >> 2), "loading")] : ch == 106 ? (growMemViews(),
-    HEAP64)[SAFE_HEAP_INDEX((growMemViews(), HEAP64), ((buf) >> 3), "loading")] : ch == 105 ? (growMemViews(),
-    HEAP32)[SAFE_HEAP_INDEX((growMemViews(), HEAP32), ((buf) >> 2), "loading")] : (growMemViews(),
+    ch == 112 ? (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((buf) >> 2), "loading")] : ch == 106 ? (growMemViews(), 
+    HEAP64)[SAFE_HEAP_INDEX((growMemViews(), HEAP64), ((buf) >> 3), "loading")] : ch == 105 ? (growMemViews(), 
+    HEAP32)[SAFE_HEAP_INDEX((growMemViews(), HEAP32), ((buf) >> 2), "loading")] : (growMemViews(), 
     HEAPF64)[SAFE_HEAP_INDEX((growMemViews(), HEAPF64), ((buf) >> 3), "loading")]);
     buf += wide ? 8 : 4;
   }
@@ -2614,7 +2614,7 @@ var WebGPU = {
   makeExtent3D: ptr => ({
     "width": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((ptr) >> 2), "loading")],
     "height": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((ptr) + (4)) >> 2), "loading")],
-    "depthOrArrayLayers": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+    "depthOrArrayLayers": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
     HEAPU32), (((ptr) + (8)) >> 2), "loading")]
   }),
   makeOrigin3D: ptr => ({
@@ -2625,11 +2625,11 @@ var WebGPU = {
   makeTexelCopyTextureInfo: ptr => {
     assert(ptr);
     return {
-      "texture": WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "texture": WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), ((ptr) >> 2), "loading")]),
       "mipLevel": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((ptr) + (4)) >> 2), "loading")],
       "origin": WebGPU.makeOrigin3D(ptr + 8),
-      "aspect": WebGPU.TextureAspect[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "aspect": WebGPU.TextureAspect[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((ptr) + (20)) >> 2), "loading")]]
     };
   },
@@ -2637,7 +2637,7 @@ var WebGPU = {
     var bytesPerRow = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((ptr) + (8)) >> 2), "loading")];
     var rowsPerImage = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((ptr) + (12)) >> 2), "loading")];
     return {
-      "offset": ((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((ptr + 4)) >> 2), "loading")] * 4294967296 + (growMemViews(),
+      "offset": ((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((ptr + 4)) >> 2), "loading")] * 4294967296 + (growMemViews(), 
       HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((ptr) >> 2), "loading")]),
       "bytesPerRow": bytesPerRow === 4294967295 ? undefined : bytesPerRow,
       "rowsPerImage": rowsPerImage === 4294967295 ? undefined : rowsPerImage
@@ -2647,18 +2647,18 @@ var WebGPU = {
     assert(ptr);
     var layoutPtr = ptr + 0;
     var bufferCopyView = WebGPU.makeTexelCopyBufferLayout(layoutPtr);
-    bufferCopyView["buffer"] = WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+    bufferCopyView["buffer"] = WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
     HEAPU32), (((ptr) + (16)) >> 2), "loading")]);
     return bufferCopyView;
   },
   makePassTimestampWrites: ptr => {
     if (ptr === 0) return undefined;
     return {
-      "querySet": WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "querySet": WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((ptr) + (4)) >> 2), "loading")]),
-      "beginningOfPassWriteIndex": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "beginningOfPassWriteIndex": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((ptr) + (8)) >> 2), "loading")],
-      "endOfPassWriteIndex": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "endOfPassWriteIndex": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((ptr) + (12)) >> 2), "loading")]
     };
   },
@@ -2681,10 +2681,10 @@ var WebGPU = {
     assert(ptr);
     assert((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((ptr) >> 2), "loading")] === 0);
     var desc = {
-      "module": WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "module": WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((ptr) + (4)) >> 2), "loading")]),
-      "constants": WebGPU.makePipelineConstants((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
-      HEAPU32), (((ptr) + (16)) >> 2), "loading")], (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "constants": WebGPU.makePipelineConstants((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
+      HEAPU32), (((ptr) + (16)) >> 2), "loading")], (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((ptr) + (20)) >> 2), "loading")]),
       "entryPoint": WebGPU.makeStringFromOptionalStringView(ptr + 8)
     };
@@ -2695,7 +2695,7 @@ var WebGPU = {
     assert((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((descriptor) >> 2), "loading")] === 0);
     var desc = {
       "label": WebGPU.makeStringFromOptionalStringView(descriptor + 4),
-      "layout": WebGPU.makePipelineLayout((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "layout": WebGPU.makePipelineLayout((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((descriptor) + (12)) >> 2), "loading")]),
       "compute": WebGPU.makeComputeState(descriptor + 16)
     };
@@ -2709,26 +2709,26 @@ var WebGPU = {
       assert(psPtr);
       assert((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((psPtr) >> 2), "loading")] === 0);
       return {
-        "topology": WebGPU.PrimitiveTopology[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "topology": WebGPU.PrimitiveTopology[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((psPtr) + (4)) >> 2), "loading")]],
-        "stripIndexFormat": WebGPU.IndexFormat[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "stripIndexFormat": WebGPU.IndexFormat[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((psPtr) + (8)) >> 2), "loading")]],
-        "frontFace": WebGPU.FrontFace[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "frontFace": WebGPU.FrontFace[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((psPtr) + (12)) >> 2), "loading")]],
-        "cullMode": WebGPU.CullMode[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "cullMode": WebGPU.CullMode[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((psPtr) + (16)) >> 2), "loading")]],
-        "unclippedDepth": !!((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "unclippedDepth": !!((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((psPtr) + (20)) >> 2), "loading")])
       };
     }
     function makeBlendComponent(bdPtr) {
       if (!bdPtr) return undefined;
       return {
-        "operation": WebGPU.BlendOperation[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "operation": WebGPU.BlendOperation[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), ((bdPtr) >> 2), "loading")]],
-        "srcFactor": WebGPU.BlendFactor[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "srcFactor": WebGPU.BlendFactor[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((bdPtr) + (4)) >> 2), "loading")]],
-        "dstFactor": WebGPU.BlendFactor[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "dstFactor": WebGPU.BlendFactor[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((bdPtr) + (8)) >> 2), "loading")]]
       };
     }
@@ -2745,7 +2745,7 @@ var WebGPU = {
       var formatInt = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((csPtr) + (4)) >> 2), "loading")];
       return formatInt === 0 ? undefined : {
         "format": WebGPU.TextureFormat[formatInt],
-        "blend": makeBlendState((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "blend": makeBlendState((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((csPtr) + (8)) >> 2), "loading")]),
         "writeMask": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((csPtr) + (16)) >> 2), "loading")]
       };
@@ -2760,13 +2760,13 @@ var WebGPU = {
     function makeStencilStateFace(ssfPtr) {
       assert(ssfPtr);
       return {
-        "compare": WebGPU.CompareFunction[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "compare": WebGPU.CompareFunction[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), ((ssfPtr) >> 2), "loading")]],
-        "failOp": WebGPU.StencilOperation[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "failOp": WebGPU.StencilOperation[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((ssfPtr) + (4)) >> 2), "loading")]],
-        "depthFailOp": WebGPU.StencilOperation[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "depthFailOp": WebGPU.StencilOperation[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((ssfPtr) + (8)) >> 2), "loading")]],
-        "passOp": WebGPU.StencilOperation[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "passOp": WebGPU.StencilOperation[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((ssfPtr) + (12)) >> 2), "loading")]]
       };
     }
@@ -2774,18 +2774,18 @@ var WebGPU = {
       if (!dssPtr) return undefined;
       assert(dssPtr);
       return {
-        "format": WebGPU.TextureFormat[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "format": WebGPU.TextureFormat[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((dssPtr) + (4)) >> 2), "loading")]],
-        "depthWriteEnabled": !!((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "depthWriteEnabled": !!((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((dssPtr) + (8)) >> 2), "loading")]),
-        "depthCompare": WebGPU.CompareFunction[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "depthCompare": WebGPU.CompareFunction[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((dssPtr) + (12)) >> 2), "loading")]],
         "stencilFront": makeStencilStateFace(dssPtr + 16),
         "stencilBack": makeStencilStateFace(dssPtr + 32),
         "stencilReadMask": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((dssPtr) + (48)) >> 2), "loading")],
         "stencilWriteMask": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((dssPtr) + (52)) >> 2), "loading")],
         "depthBias": (growMemViews(), HEAP32)[SAFE_HEAP_INDEX((growMemViews(), HEAP32), (((dssPtr) + (56)) >> 2), "loading")],
-        "depthBiasSlopeScale": (growMemViews(), HEAPF32)[SAFE_HEAP_INDEX((growMemViews(),
+        "depthBiasSlopeScale": (growMemViews(), HEAPF32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPF32), (((dssPtr) + (60)) >> 2), "loading")],
         "depthBiasClamp": (growMemViews(), HEAPF32)[SAFE_HEAP_INDEX((growMemViews(), HEAPF32), (((dssPtr) + (64)) >> 2), "loading")]
       };
@@ -2793,9 +2793,9 @@ var WebGPU = {
     function makeVertexAttribute(vaPtr) {
       assert(vaPtr);
       return {
-        "format": WebGPU.VertexFormat[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "format": WebGPU.VertexFormat[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((vaPtr) + (4)) >> 2), "loading")]],
-        "offset": ((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((((vaPtr + 4)) + (8)) >> 2), "loading")] * 4294967296 + (growMemViews(),
+        "offset": ((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((((vaPtr + 4)) + (8)) >> 2), "loading")] * 4294967296 + (growMemViews(), 
         HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((vaPtr) + (8)) >> 2), "loading")]),
         "shaderLocation": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((vaPtr) + (16)) >> 2), "loading")]
       };
@@ -2810,16 +2810,16 @@ var WebGPU = {
     function makeVertexBuffer(vbPtr) {
       if (!vbPtr) return undefined;
       var stepModeInt = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((vbPtr) + (4)) >> 2), "loading")];
-      var attributeCountInt = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      var attributeCountInt = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((vbPtr) + (16)) >> 2), "loading")];
       if (stepModeInt === 0 && attributeCountInt === 0) {
         return null;
       }
       return {
-        "arrayStride": ((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((((vbPtr + 4)) + (8)) >> 2), "loading")] * 4294967296 + (growMemViews(),
+        "arrayStride": ((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((((vbPtr + 4)) + (8)) >> 2), "loading")] * 4294967296 + (growMemViews(), 
         HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((vbPtr) + (8)) >> 2), "loading")]),
         "stepMode": WebGPU.VertexStepMode[stepModeInt],
-        "attributes": makeVertexAttributes(attributeCountInt, (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "attributes": makeVertexAttributes(attributeCountInt, (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((vbPtr) + (20)) >> 2), "loading")])
       };
     }
@@ -2836,13 +2836,13 @@ var WebGPU = {
       assert(viPtr);
       assert((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((viPtr) >> 2), "loading")] === 0);
       var desc = {
-        "module": WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "module": WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((viPtr) + (4)) >> 2), "loading")]),
-        "constants": WebGPU.makePipelineConstants((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
-        HEAPU32), (((viPtr) + (16)) >> 2), "loading")], (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "constants": WebGPU.makePipelineConstants((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
+        HEAPU32), (((viPtr) + (16)) >> 2), "loading")], (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((viPtr) + (20)) >> 2), "loading")]),
-        "buffers": makeVertexBuffers((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
-        HEAPU32), (((viPtr) + (24)) >> 2), "loading")], (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "buffers": makeVertexBuffers((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
+        HEAPU32), (((viPtr) + (24)) >> 2), "loading")], (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((viPtr) + (28)) >> 2), "loading")]),
         "entryPoint": WebGPU.makeStringFromOptionalStringView(viPtr + 8)
       };
@@ -2855,7 +2855,7 @@ var WebGPU = {
       return {
         "count": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((msPtr) + (4)) >> 2), "loading")],
         "mask": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((msPtr) + (8)) >> 2), "loading")],
-        "alphaToCoverageEnabled": !!((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "alphaToCoverageEnabled": !!((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((msPtr) + (12)) >> 2), "loading")])
       };
     }
@@ -2864,13 +2864,13 @@ var WebGPU = {
       assert(fsPtr);
       assert((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((fsPtr) >> 2), "loading")] === 0);
       var desc = {
-        "module": WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "module": WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((fsPtr) + (4)) >> 2), "loading")]),
-        "constants": WebGPU.makePipelineConstants((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
-        HEAPU32), (((fsPtr) + (16)) >> 2), "loading")], (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "constants": WebGPU.makePipelineConstants((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
+        HEAPU32), (((fsPtr) + (16)) >> 2), "loading")], (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((fsPtr) + (20)) >> 2), "loading")]),
-        "targets": makeColorStates((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
-        HEAPU32), (((fsPtr) + (24)) >> 2), "loading")], (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        "targets": makeColorStates((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
+        HEAPU32), (((fsPtr) + (24)) >> 2), "loading")], (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((fsPtr) + (28)) >> 2), "loading")]),
         "entryPoint": WebGPU.makeStringFromOptionalStringView(fsPtr + 8)
       };
@@ -2878,14 +2878,14 @@ var WebGPU = {
     }
     var desc = {
       "label": WebGPU.makeStringFromOptionalStringView(descriptor + 4),
-      "layout": WebGPU.makePipelineLayout((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "layout": WebGPU.makePipelineLayout((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((descriptor) + (12)) >> 2), "loading")]),
       "vertex": makeVertexState(descriptor + 16),
       "primitive": makePrimitiveState(descriptor + 48),
-      "depthStencil": makeDepthStencilState((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "depthStencil": makeDepthStencilState((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((descriptor) + (72)) >> 2), "loading")]),
       "multisample": makeMultisampleState(descriptor + 76),
-      "fragment": makeFragmentState((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "fragment": makeFragmentState((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((descriptor) + (92)) >> 2), "loading")])
     };
     return desc;
@@ -3057,10 +3057,10 @@ function _emwgpuAdapterRequestDevice(adapterPtr, futureId, deviceLostFutureId, d
   if (descriptor) {
     assert(descriptor);
     assert((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((descriptor) >> 2), "loading")] === 0);
-    var requiredFeatureCount = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+    var requiredFeatureCount = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
     HEAPU32), (((descriptor) + (12)) >> 2), "loading")];
     if (requiredFeatureCount) {
-      var requiredFeaturesPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      var requiredFeaturesPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((descriptor) + (16)) >> 2), "loading")];
       // requiredFeaturesPtr is a pointer to an array of FeatureName which is an enum of size uint32_t
       desc["requiredFeatures"] = Array.from((growMemViews(), HEAPU32).subarray((((requiredFeaturesPtr) >> 2)), ((requiredFeaturesPtr + requiredFeatureCount * 4) >> 2)), feature => WebGPU.FeatureName[feature]);
@@ -3083,8 +3083,8 @@ function _emwgpuAdapterRequestDevice(adapterPtr, futureId, deviceLostFutureId, d
         var limitPart1 = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((ptr) >> 2), "loading")];
         var limitPart2 = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((ptr) + (4)) >> 2), "loading")];
         if (limitPart1 != 4294967295 || limitPart2 != 4294967295) {
-          requiredLimits[name] = ((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
-          HEAPU32), (((ptr + 4)) >> 2), "loading")] * 4294967296 + (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+          requiredLimits[name] = ((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
+          HEAPU32), (((ptr + 4)) >> 2), "loading")] * 4294967296 + (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
           HEAPU32), ((ptr) >> 2), "loading")]);
         }
       }
@@ -3122,7 +3122,7 @@ function _emwgpuAdapterRequestDevice(adapterPtr, futureId, deviceLostFutureId, d
       setLimitU32IfDefined("maxImmediateSize", 148, true);
       desc["requiredLimits"] = requiredLimits;
     }
-    var defaultQueuePtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+    var defaultQueuePtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
     HEAPU32), (((descriptor) + (24)) >> 2), "loading")];
     if (defaultQueuePtr) {
       var defaultQueueDesc = {
@@ -3191,12 +3191,12 @@ var _emwgpuDelete = ptr => {
 var _emwgpuDeviceCreateBuffer = (devicePtr, descriptor, bufferPtr) => {
   assert(descriptor);
   assert((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((descriptor) >> 2), "loading")] === 0);
-  var mappedAtCreation = !!((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+  var mappedAtCreation = !!((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
   HEAPU32), (((descriptor) + (32)) >> 2), "loading")]);
   var desc = {
     "label": WebGPU.makeStringFromOptionalStringView(descriptor + 4),
     "usage": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((descriptor) + (16)) >> 2), "loading")],
-    "size": ((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((((descriptor + 4)) + (24)) >> 2), "loading")] * 4294967296 + (growMemViews(),
+    "size": ((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((((descriptor + 4)) + (24)) >> 2), "loading")] * 4294967296 + (growMemViews(), 
     HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((descriptor) + (24)) >> 2), "loading")]),
     "mappedAtCreation": mappedAtCreation
   };
@@ -3220,7 +3220,7 @@ var _emwgpuDeviceCreateBuffer = (devicePtr, descriptor, bufferPtr) => {
 
 var _emwgpuDeviceCreateShaderModule = (devicePtr, descriptor, shaderModulePtr) => {
   assert(descriptor);
-  var nextInChainPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+  var nextInChainPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
   HEAPU32), ((descriptor) >> 2), "loading")];
   assert(nextInChainPtr !== 0);
   var sType = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((nextInChainPtr) + (4)) >> 2), "loading")];
@@ -3267,12 +3267,12 @@ function _emwgpuInstanceRequestAdapter(instancePtr, futureId, options, adapterPt
     var featureLevel = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((options) + (4)) >> 2), "loading")];
     opts = {
       "featureLevel": WebGPU.FeatureLevel[featureLevel],
-      "powerPreference": WebGPU.PowerPreference[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "powerPreference": WebGPU.PowerPreference[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((options) + (8)) >> 2), "loading")]],
-      "forceFallbackAdapter": !!((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "forceFallbackAdapter": !!((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((options) + (12)) >> 2), "loading")])
     };
-    var nextInChainPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+    var nextInChainPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
     HEAPU32), ((options) >> 2), "loading")];
     if (nextInChainPtr !== 0) {
       var sType = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((nextInChainPtr) + (4)) >> 2), "loading")];
@@ -3281,7 +3281,7 @@ function _emwgpuInstanceRequestAdapter(instancePtr, futureId, options, adapterPt
       var webxrOptions = nextInChainPtr;
       assert(webxrOptions);
       assert((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((webxrOptions) >> 2), "loading")] === 0);
-      opts.xrCompatible = !!((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      opts.xrCompatible = !!((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((webxrOptions) + (8)) >> 2), "loading")]);
     }
   }
@@ -3446,7 +3446,7 @@ var initRandomFill = () => {
   }
   // like with most Web APIs, we can't use Web Crypto API directly on shared memory,
   // so we need to create an intermediate buffer and copy it to the destination
-  return view => (view.set(crypto.getRandomValues(new Uint8Array(view.byteLength))),
+  return view => (view.set(crypto.getRandomValues(new Uint8Array(view.byteLength))), 
   0);
 };
 
@@ -6066,7 +6066,7 @@ var _wgpuCommandEncoderBeginRenderPass = (encoderPtr, descriptor) => {
     return {
       "view": WebGPU.getJsObject(viewPtr),
       "depthSlice": depthSlice,
-      "resolveTarget": WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "resolveTarget": WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((caPtr) + (12)) >> 2), "loading")]),
       "clearValue": clearValue,
       "loadOp": WebGPU.LoadOp[loadOpInt],
@@ -6083,27 +6083,27 @@ var _wgpuCommandEncoderBeginRenderPass = (encoderPtr, descriptor) => {
   function makeDepthStencilAttachment(dsaPtr) {
     if (dsaPtr === 0) return undefined;
     return {
-      "view": WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "view": WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((dsaPtr) + (4)) >> 2), "loading")]),
       "depthClearValue": (growMemViews(), HEAPF32)[SAFE_HEAP_INDEX((growMemViews(), HEAPF32), (((dsaPtr) + (16)) >> 2), "loading")],
-      "depthLoadOp": WebGPU.LoadOp[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "depthLoadOp": WebGPU.LoadOp[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((dsaPtr) + (8)) >> 2), "loading")]],
-      "depthStoreOp": WebGPU.StoreOp[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "depthStoreOp": WebGPU.StoreOp[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((dsaPtr) + (12)) >> 2), "loading")]],
       "depthReadOnly": !!((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((dsaPtr) + (20)) >> 2), "loading")]),
-      "stencilClearValue": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "stencilClearValue": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((dsaPtr) + (32)) >> 2), "loading")],
-      "stencilLoadOp": WebGPU.LoadOp[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "stencilLoadOp": WebGPU.LoadOp[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((dsaPtr) + (24)) >> 2), "loading")]],
-      "stencilStoreOp": WebGPU.StoreOp[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "stencilStoreOp": WebGPU.StoreOp[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((dsaPtr) + (28)) >> 2), "loading")]],
-      "stencilReadOnly": !!((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "stencilReadOnly": !!((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((dsaPtr) + (36)) >> 2), "loading")])
     };
   }
   function makeRenderPassDescriptor(descriptor) {
     assert(descriptor);
-    var nextInChainPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+    var nextInChainPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
     HEAPU32), ((descriptor) >> 2), "loading")];
     var maxDrawCount = undefined;
     if (nextInChainPtr !== 0) {
@@ -6113,19 +6113,19 @@ var _wgpuCommandEncoderBeginRenderPass = (encoderPtr, descriptor) => {
       var renderPassMaxDrawCount = nextInChainPtr;
       assert(renderPassMaxDrawCount);
       assert((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((renderPassMaxDrawCount) >> 2), "loading")] === 0);
-      maxDrawCount = ((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((((renderPassMaxDrawCount + 4)) + (8)) >> 2), "loading")] * 4294967296 + (growMemViews(),
+      maxDrawCount = ((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((((renderPassMaxDrawCount + 4)) + (8)) >> 2), "loading")] * 4294967296 + (growMemViews(), 
       HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((renderPassMaxDrawCount) + (8)) >> 2), "loading")]);
     }
     var desc = {
       "label": WebGPU.makeStringFromOptionalStringView(descriptor + 4),
-      "colorAttachments": makeColorAttachments((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
-      HEAPU32), (((descriptor) + (12)) >> 2), "loading")], (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "colorAttachments": makeColorAttachments((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
+      HEAPU32), (((descriptor) + (12)) >> 2), "loading")], (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((descriptor) + (16)) >> 2), "loading")]),
-      "depthStencilAttachment": makeDepthStencilAttachment((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "depthStencilAttachment": makeDepthStencilAttachment((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((descriptor) + (20)) >> 2), "loading")]),
-      "occlusionQuerySet": WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "occlusionQuerySet": WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((descriptor) + (24)) >> 2), "loading")]),
-      "timestampWrites": WebGPU.makePassTimestampWrites((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "timestampWrites": WebGPU.makePassTimestampWrites((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((descriptor) + (28)) >> 2), "loading")]),
       "maxDrawCount": maxDrawCount
     };
@@ -6146,8 +6146,8 @@ var _wgpuCommandEncoderFinish = (encoderPtr, descriptor) => {
   return ptr;
 };
 
-var readI53FromI64 = ptr => (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
-HEAPU32), ((ptr) >> 2), "loading")] + (growMemViews(), HEAP32)[SAFE_HEAP_INDEX((growMemViews(),
+var readI53FromI64 = ptr => (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
+HEAPU32), ((ptr) >> 2), "loading")] + (growMemViews(), HEAP32)[SAFE_HEAP_INDEX((growMemViews(), 
 HEAP32), (((ptr) + (4)) >> 2), "loading")] * 4294967296;
 
 var _wgpuDeviceCreateBindGroup = (devicePtr, descriptor) => {
@@ -6157,7 +6157,7 @@ var _wgpuDeviceCreateBindGroup = (devicePtr, descriptor) => {
     assert(entryPtr);
     var bufferPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((entryPtr) + (8)) >> 2), "loading")];
     var samplerPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((entryPtr) + (32)) >> 2), "loading")];
-    var textureViewPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+    var textureViewPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
     HEAPU32), (((entryPtr) + (36)) >> 2), "loading")];
     assert((bufferPtr !== 0) + (samplerPtr !== 0) + (textureViewPtr !== 0) === 1);
     var binding = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((entryPtr) + (4)) >> 2), "loading")];
@@ -6168,7 +6168,7 @@ var _wgpuDeviceCreateBindGroup = (devicePtr, descriptor) => {
         "binding": binding,
         "resource": {
           "buffer": WebGPU.getJsObject(bufferPtr),
-          "offset": ((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((((entryPtr + 4)) + (16)) >> 2), "loading")] * 4294967296 + (growMemViews(),
+          "offset": ((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((((entryPtr + 4)) + (16)) >> 2), "loading")] * 4294967296 + (growMemViews(), 
           HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((entryPtr) + (16)) >> 2), "loading")]),
           "size": size
         }
@@ -6194,10 +6194,10 @@ var _wgpuDeviceCreateBindGroup = (devicePtr, descriptor) => {
   }
   var desc = {
     "label": WebGPU.makeStringFromOptionalStringView(descriptor + 4),
-    "layout": WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+    "layout": WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
     HEAPU32), (((descriptor) + (12)) >> 2), "loading")]),
-    "entries": makeEntries((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
-    HEAPU32), (((descriptor) + (16)) >> 2), "loading")], (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+    "entries": makeEntries((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
+    HEAPU32), (((descriptor) + (16)) >> 2), "loading")], (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
     HEAPU32), (((descriptor) + (20)) >> 2), "loading")])
   };
   var device = WebGPU.getJsObject(devicePtr);
@@ -6215,9 +6215,9 @@ var _wgpuDeviceCreateBindGroupLayout = (devicePtr, descriptor) => {
     if (!typeInt) return undefined;
     return {
       "type": WebGPU.BufferBindingType[typeInt],
-      "hasDynamicOffset": !!((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "hasDynamicOffset": !!((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((entryPtr) + (8)) >> 2), "loading")]),
-      "minBindingSize": ((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((((entryPtr + 4)) + (16)) >> 2), "loading")] * 4294967296 + (growMemViews(),
+      "minBindingSize": ((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((((entryPtr + 4)) + (16)) >> 2), "loading")] * 4294967296 + (growMemViews(), 
       HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((entryPtr) + (16)) >> 2), "loading")])
     };
   }
@@ -6235,7 +6235,7 @@ var _wgpuDeviceCreateBindGroupLayout = (devicePtr, descriptor) => {
     if (!sampleTypeInt) return undefined;
     return {
       "sampleType": WebGPU.TextureSampleType[sampleTypeInt],
-      "viewDimension": WebGPU.TextureViewDimension[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "viewDimension": WebGPU.TextureViewDimension[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((entryPtr) + (8)) >> 2), "loading")]],
       "multisampled": !!((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((entryPtr) + (12)) >> 2), "loading")])
     };
@@ -6246,9 +6246,9 @@ var _wgpuDeviceCreateBindGroupLayout = (devicePtr, descriptor) => {
     if (!accessInt) return undefined;
     return {
       "access": WebGPU.StorageTextureAccess[accessInt],
-      "format": WebGPU.TextureFormat[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "format": WebGPU.TextureFormat[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((entryPtr) + (8)) >> 2), "loading")]],
-      "viewDimension": WebGPU.TextureViewDimension[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "viewDimension": WebGPU.TextureViewDimension[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((entryPtr) + (12)) >> 2), "loading")]]
     };
   }
@@ -6257,7 +6257,7 @@ var _wgpuDeviceCreateBindGroupLayout = (devicePtr, descriptor) => {
     // bindingArraySize is not specced and thus not implemented yet. We don't pass it through
     // because if we did, then existing apps using this version of the bindings could break when
     // browsers start accepting bindingArraySize.
-    var bindingArraySize = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+    var bindingArraySize = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
     HEAPU32), (((entryPtr) + (16)) >> 2), "loading")];
     assert(bindingArraySize == 0 || bindingArraySize == 1);
     return {
@@ -6278,8 +6278,8 @@ var _wgpuDeviceCreateBindGroupLayout = (devicePtr, descriptor) => {
   }
   var desc = {
     "label": WebGPU.makeStringFromOptionalStringView(descriptor + 4),
-    "entries": makeEntries((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
-    HEAPU32), (((descriptor) + (12)) >> 2), "loading")], (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+    "entries": makeEntries((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
+    HEAPU32), (((descriptor) + (12)) >> 2), "loading")], (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
     HEAPU32), (((descriptor) + (16)) >> 2), "loading")])
   };
   var device = WebGPU.getJsObject(devicePtr);
@@ -6310,7 +6310,7 @@ var _wgpuDeviceCreatePipelineLayout = (devicePtr, descriptor) => {
   var bglPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((descriptor) + (16)) >> 2), "loading")];
   var bgls = [];
   for (var i = 0; i < bglCount; ++i) {
-    bgls.push(WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+    bgls.push(WebGPU.getJsObject((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
     HEAPU32), (((bglPtr) + (4 * i)) >> 2), "loading")]));
   }
   var desc = {
@@ -6338,21 +6338,21 @@ var _wgpuDeviceCreateSampler = (devicePtr, descriptor) => {
     assert((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((descriptor) >> 2), "loading")] === 0);
     desc = {
       "label": WebGPU.makeStringFromOptionalStringView(descriptor + 4),
-      "addressModeU": WebGPU.AddressMode[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "addressModeU": WebGPU.AddressMode[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((descriptor) + (12)) >> 2), "loading")]],
-      "addressModeV": WebGPU.AddressMode[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "addressModeV": WebGPU.AddressMode[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((descriptor) + (16)) >> 2), "loading")]],
-      "addressModeW": WebGPU.AddressMode[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "addressModeW": WebGPU.AddressMode[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((descriptor) + (20)) >> 2), "loading")]],
-      "magFilter": WebGPU.FilterMode[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "magFilter": WebGPU.FilterMode[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((descriptor) + (24)) >> 2), "loading")]],
-      "minFilter": WebGPU.FilterMode[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "minFilter": WebGPU.FilterMode[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((descriptor) + (28)) >> 2), "loading")]],
-      "mipmapFilter": WebGPU.MipmapFilterMode[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "mipmapFilter": WebGPU.MipmapFilterMode[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((descriptor) + (32)) >> 2), "loading")]],
       "lodMinClamp": (growMemViews(), HEAPF32)[SAFE_HEAP_INDEX((growMemViews(), HEAPF32), (((descriptor) + (36)) >> 2), "loading")],
       "lodMaxClamp": (growMemViews(), HEAPF32)[SAFE_HEAP_INDEX((growMemViews(), HEAPF32), (((descriptor) + (40)) >> 2), "loading")],
-      "compare": WebGPU.CompareFunction[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "compare": WebGPU.CompareFunction[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((descriptor) + (44)) >> 2), "loading")]],
       "maxAnisotropy": (growMemViews(), HEAPU16)[SAFE_HEAP_INDEX((growMemViews(), HEAPU16), (((descriptor) + (48)) >> 1), "loading")]
     };
@@ -6371,16 +6371,16 @@ var _wgpuDeviceCreateTexture = (devicePtr, descriptor) => {
     "size": WebGPU.makeExtent3D(descriptor + 28),
     "mipLevelCount": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((descriptor) + (44)) >> 2), "loading")],
     "sampleCount": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((descriptor) + (48)) >> 2), "loading")],
-    "dimension": WebGPU.TextureDimension[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+    "dimension": WebGPU.TextureDimension[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
     HEAPU32), (((descriptor) + (24)) >> 2), "loading")]],
-    "format": WebGPU.TextureFormat[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+    "format": WebGPU.TextureFormat[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
     HEAPU32), (((descriptor) + (40)) >> 2), "loading")]],
     "usage": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((descriptor) + (16)) >> 2), "loading")]
   };
-  var viewFormatCount = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+  var viewFormatCount = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
   HEAPU32), (((descriptor) + (52)) >> 2), "loading")];
   if (viewFormatCount) {
-    var viewFormatsPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+    var viewFormatsPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
     HEAPU32), (((descriptor) + (56)) >> 2), "loading")];
     // viewFormatsPtr pointer to an array of TextureFormat which is an enum of size uint32_t
     desc["viewFormats"] = Array.from((growMemViews(), HEAP32).subarray((((viewFormatsPtr) >> 2)), ((viewFormatsPtr + viewFormatCount * 4) >> 2)), format => WebGPU.TextureFormat[format]);
@@ -6395,7 +6395,7 @@ var findCanvasEventTarget = findEventTarget;
 
 var _wgpuInstanceCreateSurface = (instancePtr, descriptor) => {
   assert(descriptor);
-  var nextInChainPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+  var nextInChainPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
   HEAPU32), ((descriptor) >> 2), "loading")];
   assert(nextInChainPtr !== 0);
   assert(262144 === (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((nextInChainPtr) + (4)) >> 2), "loading")]);
@@ -6487,7 +6487,7 @@ var _wgpuSurfaceConfigure = (surfacePtr, config) => {
   var context = WebGPU.getJsObject(surfacePtr);
   var presentMode = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((config) + (44)) >> 2), "loading")];
   assert(presentMode === 1 || presentMode === 0);
-  var canvasSize = [ (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((config) + (24)) >> 2), "loading")], (growMemViews(),
+  var canvasSize = [ (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((config) + (24)) >> 2), "loading")], (growMemViews(), 
   HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((config) + (28)) >> 2), "loading")] ];
   if (canvasSize[0] !== 0) {
     context["canvas"]["width"] = canvasSize[0];
@@ -6497,22 +6497,22 @@ var _wgpuSurfaceConfigure = (surfacePtr, config) => {
   }
   var configuration = {
     "device": WebGPU.getJsObject(devicePtr),
-    "format": WebGPU.TextureFormat[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+    "format": WebGPU.TextureFormat[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
     HEAPU32), (((config) + (8)) >> 2), "loading")]],
     "usage": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((config) + (16)) >> 2), "loading")],
-    "alphaMode": WebGPU.CompositeAlphaMode[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+    "alphaMode": WebGPU.CompositeAlphaMode[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
     HEAPU32), (((config) + (40)) >> 2), "loading")]]
   };
-  var viewFormatCount = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+  var viewFormatCount = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
   HEAPU32), (((config) + (32)) >> 2), "loading")];
   if (viewFormatCount) {
-    var viewFormatsPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+    var viewFormatsPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
     HEAPU32), (((config) + (36)) >> 2), "loading")];
     // viewFormatsPtr pointer to an array of TextureFormat which is an enum of size uint32_t
     configuration["viewFormats"] = Array.from((growMemViews(), HEAP32).subarray((((viewFormatsPtr) >> 2)), ((viewFormatsPtr + viewFormatCount * 4) >> 2)), format => WebGPU.TextureFormat[format]);
   }
   {
-    var nextInChainPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+    var nextInChainPtr = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
     HEAPU32), ((config) >> 2), "loading")];
     if (nextInChainPtr !== 0) {
       var sType = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((nextInChainPtr) + (4)) >> 2), "loading")];
@@ -6521,10 +6521,10 @@ var _wgpuSurfaceConfigure = (surfacePtr, config) => {
       var surfaceColorManagement = nextInChainPtr;
       assert(surfaceColorManagement);
       assert((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((surfaceColorManagement) >> 2), "loading")] === 0);
-      configuration.colorSpace = WebGPU.PredefinedColorSpace[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      configuration.colorSpace = WebGPU.PredefinedColorSpace[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((surfaceColorManagement) + (8)) >> 2), "loading")]];
       configuration.toneMapping = {
-        mode: WebGPU.ToneMappingMode[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+        mode: WebGPU.ToneMappingMode[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
         HEAPU32), (((surfaceColorManagement) + (12)) >> 2), "loading")]]
       };
     }
@@ -6555,19 +6555,19 @@ var _wgpuTextureCreateView = (texturePtr, descriptor) => {
     assert(descriptor);
     assert((growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), ((descriptor) >> 2), "loading")] === 0);
     var mipLevelCount = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((descriptor) + (24)) >> 2), "loading")];
-    var arrayLayerCount = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+    var arrayLayerCount = (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
     HEAPU32), (((descriptor) + (32)) >> 2), "loading")];
     desc = {
       "label": WebGPU.makeStringFromOptionalStringView(descriptor + 4),
-      "format": WebGPU.TextureFormat[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "format": WebGPU.TextureFormat[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((descriptor) + (12)) >> 2), "loading")]],
-      "dimension": WebGPU.TextureViewDimension[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "dimension": WebGPU.TextureViewDimension[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((descriptor) + (16)) >> 2), "loading")]],
       "baseMipLevel": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((descriptor) + (20)) >> 2), "loading")],
       "mipLevelCount": mipLevelCount === 4294967295 ? undefined : mipLevelCount,
       "baseArrayLayer": (growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), HEAPU32), (((descriptor) + (28)) >> 2), "loading")],
       "arrayLayerCount": arrayLayerCount === 4294967295 ? undefined : arrayLayerCount,
-      "aspect": WebGPU.TextureAspect[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(),
+      "aspect": WebGPU.TextureAspect[(growMemViews(), HEAPU32)[SAFE_HEAP_INDEX((growMemViews(), 
       HEAPU32), (((descriptor) + (36)) >> 2), "loading")]]
     };
   }
@@ -6735,19 +6735,19 @@ function checkIncomingModuleAPI() {
 }
 
 var ASM_CONSTS = {
-  125100: $0 => {
+  122108: $0 => {
     if (Module.onRendererEvent) Module.onRendererEvent(2, $0);
   },
-  125163: $0 => {
+  122171: $0 => {
     if (Module.onRendererEvent) Module.onRendererEvent(1, $0);
   },
-  125226: $0 => {
+  122234: $0 => {
     if (Module.onRendererEvent) Module.onRendererEvent(3, $0);
   },
-  125289: $0 => {
+  122297: $0 => {
     if (Module.onRendererEvent) Module.onRendererEvent(4, $0);
   },
-  125352: ($0, $1) => {
+  122360: ($0, $1) => {
     if (Module.onWebGPUError) {
       Module.onWebGPUError($0, UTF8ToString($1));
     }
@@ -6781,37 +6781,17 @@ var _setScrollingSpeed = Module["_setScrollingSpeed"] = makeInvalidEarlyAccess("
 
 var _setScrollingOffset = Module["_setScrollingOffset"] = makeInvalidEarlyAccess("_setScrollingOffset");
 
-var _setPreprocessingMode = Module["_setPreprocessingMode"] = makeInvalidEarlyAccess("_setPreprocessingMode");
+var _setStyles = Module["_setStyles"] = makeInvalidEarlyAccess("_setStyles");
 
-var _setPostprocessingMode = Module["_setPostprocessingMode"] = makeInvalidEarlyAccess("_setPostprocessingMode");
+var _setTone = Module["_setTone"] = makeInvalidEarlyAccess("_setTone");
 
-var _setIkedaThreshold = Module["_setIkedaThreshold"] = makeInvalidEarlyAccess("_setIkedaThreshold");
+var _setStructure = Module["_setStructure"] = makeInvalidEarlyAccess("_setStructure");
 
-var _setIkedaGridSize = Module["_setIkedaGridSize"] = makeInvalidEarlyAccess("_setIkedaGridSize");
+var _setMosh = Module["_setMosh"] = makeInvalidEarlyAccess("_setMosh");
 
-var _setIkedaDataIntensity = Module["_setIkedaDataIntensity"] = makeInvalidEarlyAccess("_setIkedaDataIntensity");
+var _setTemporal = Module["_setTemporal"] = makeInvalidEarlyAccess("_setTemporal");
 
-var _setIkedaFrequency = Module["_setIkedaFrequency"] = makeInvalidEarlyAccess("_setIkedaFrequency");
-
-var _setIkedaPhaseShift = Module["_setIkedaPhaseShift"] = makeInvalidEarlyAccess("_setIkedaPhaseShift");
-
-var _setIkedaNoiseLevel = Module["_setIkedaNoiseLevel"] = makeInvalidEarlyAccess("_setIkedaNoiseLevel");
-
-var _setIkedaStripWidth = Module["_setIkedaStripWidth"] = makeInvalidEarlyAccess("_setIkedaStripWidth");
-
-var _setIkedaQuantumLevels = Module["_setIkedaQuantumLevels"] = makeInvalidEarlyAccess("_setIkedaQuantumLevels");
-
-var _setIkedaScanSpeed = Module["_setIkedaScanSpeed"] = makeInvalidEarlyAccess("_setIkedaScanSpeed");
-
-var _setIkedaMatrixScale = Module["_setIkedaMatrixScale"] = makeInvalidEarlyAccess("_setIkedaMatrixScale");
-
-var _setIkedaPulseRate = Module["_setIkedaPulseRate"] = makeInvalidEarlyAccess("_setIkedaPulseRate");
-
-var _getImageAverageLuminance = Module["_getImageAverageLuminance"] = makeInvalidEarlyAccess("_getImageAverageLuminance");
-
-var _getImageEntropy = Module["_getImageEntropy"] = makeInvalidEarlyAccess("_getImageEntropy");
-
-var _getImageVariance = Module["_getImageVariance"] = makeInvalidEarlyAccess("_getImageVariance");
+var _pulse = Module["_pulse"] = makeInvalidEarlyAccess("_pulse");
 
 var _main = Module["_main"] = makeInvalidEarlyAccess("_main");
 
@@ -6957,22 +6937,12 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports["setMaxUploadsPerFrame"] != "undefined", "missing Wasm export: setMaxUploadsPerFrame");
   assert(typeof wasmExports["setScrollingSpeed"] != "undefined", "missing Wasm export: setScrollingSpeed");
   assert(typeof wasmExports["setScrollingOffset"] != "undefined", "missing Wasm export: setScrollingOffset");
-  assert(typeof wasmExports["setPreprocessingMode"] != "undefined", "missing Wasm export: setPreprocessingMode");
-  assert(typeof wasmExports["setPostprocessingMode"] != "undefined", "missing Wasm export: setPostprocessingMode");
-  assert(typeof wasmExports["setIkedaThreshold"] != "undefined", "missing Wasm export: setIkedaThreshold");
-  assert(typeof wasmExports["setIkedaGridSize"] != "undefined", "missing Wasm export: setIkedaGridSize");
-  assert(typeof wasmExports["setIkedaDataIntensity"] != "undefined", "missing Wasm export: setIkedaDataIntensity");
-  assert(typeof wasmExports["setIkedaFrequency"] != "undefined", "missing Wasm export: setIkedaFrequency");
-  assert(typeof wasmExports["setIkedaPhaseShift"] != "undefined", "missing Wasm export: setIkedaPhaseShift");
-  assert(typeof wasmExports["setIkedaNoiseLevel"] != "undefined", "missing Wasm export: setIkedaNoiseLevel");
-  assert(typeof wasmExports["setIkedaStripWidth"] != "undefined", "missing Wasm export: setIkedaStripWidth");
-  assert(typeof wasmExports["setIkedaQuantumLevels"] != "undefined", "missing Wasm export: setIkedaQuantumLevels");
-  assert(typeof wasmExports["setIkedaScanSpeed"] != "undefined", "missing Wasm export: setIkedaScanSpeed");
-  assert(typeof wasmExports["setIkedaMatrixScale"] != "undefined", "missing Wasm export: setIkedaMatrixScale");
-  assert(typeof wasmExports["setIkedaPulseRate"] != "undefined", "missing Wasm export: setIkedaPulseRate");
-  assert(typeof wasmExports["getImageAverageLuminance"] != "undefined", "missing Wasm export: getImageAverageLuminance");
-  assert(typeof wasmExports["getImageEntropy"] != "undefined", "missing Wasm export: getImageEntropy");
-  assert(typeof wasmExports["getImageVariance"] != "undefined", "missing Wasm export: getImageVariance");
+  assert(typeof wasmExports["setStyles"] != "undefined", "missing Wasm export: setStyles");
+  assert(typeof wasmExports["setTone"] != "undefined", "missing Wasm export: setTone");
+  assert(typeof wasmExports["setStructure"] != "undefined", "missing Wasm export: setStructure");
+  assert(typeof wasmExports["setMosh"] != "undefined", "missing Wasm export: setMosh");
+  assert(typeof wasmExports["setTemporal"] != "undefined", "missing Wasm export: setTemporal");
+  assert(typeof wasmExports["pulse"] != "undefined", "missing Wasm export: pulse");
   assert(typeof wasmExports["main"] != "undefined", "missing Wasm export: main");
   assert(typeof wasmExports["emwgpuCreateBindGroup"] != "undefined", "missing Wasm export: emwgpuCreateBindGroup");
   assert(typeof wasmExports["emwgpuCreateBindGroupLayout"] != "undefined", "missing Wasm export: emwgpuCreateBindGroupLayout");
@@ -7050,22 +7020,12 @@ function assignWasmExports(wasmExports) {
   _setMaxUploadsPerFrame = Module["_setMaxUploadsPerFrame"] = createExportWrapper("setMaxUploadsPerFrame", 1);
   _setScrollingSpeed = Module["_setScrollingSpeed"] = createExportWrapper("setScrollingSpeed", 2);
   _setScrollingOffset = Module["_setScrollingOffset"] = createExportWrapper("setScrollingOffset", 2);
-  _setPreprocessingMode = Module["_setPreprocessingMode"] = createExportWrapper("setPreprocessingMode", 1);
-  _setPostprocessingMode = Module["_setPostprocessingMode"] = createExportWrapper("setPostprocessingMode", 1);
-  _setIkedaThreshold = Module["_setIkedaThreshold"] = createExportWrapper("setIkedaThreshold", 1);
-  _setIkedaGridSize = Module["_setIkedaGridSize"] = createExportWrapper("setIkedaGridSize", 1);
-  _setIkedaDataIntensity = Module["_setIkedaDataIntensity"] = createExportWrapper("setIkedaDataIntensity", 1);
-  _setIkedaFrequency = Module["_setIkedaFrequency"] = createExportWrapper("setIkedaFrequency", 1);
-  _setIkedaPhaseShift = Module["_setIkedaPhaseShift"] = createExportWrapper("setIkedaPhaseShift", 1);
-  _setIkedaNoiseLevel = Module["_setIkedaNoiseLevel"] = createExportWrapper("setIkedaNoiseLevel", 1);
-  _setIkedaStripWidth = Module["_setIkedaStripWidth"] = createExportWrapper("setIkedaStripWidth", 1);
-  _setIkedaQuantumLevels = Module["_setIkedaQuantumLevels"] = createExportWrapper("setIkedaQuantumLevels", 1);
-  _setIkedaScanSpeed = Module["_setIkedaScanSpeed"] = createExportWrapper("setIkedaScanSpeed", 1);
-  _setIkedaMatrixScale = Module["_setIkedaMatrixScale"] = createExportWrapper("setIkedaMatrixScale", 1);
-  _setIkedaPulseRate = Module["_setIkedaPulseRate"] = createExportWrapper("setIkedaPulseRate", 1);
-  _getImageAverageLuminance = Module["_getImageAverageLuminance"] = createExportWrapper("getImageAverageLuminance", 0);
-  _getImageEntropy = Module["_getImageEntropy"] = createExportWrapper("getImageEntropy", 0);
-  _getImageVariance = Module["_getImageVariance"] = createExportWrapper("getImageVariance", 0);
+  _setStyles = Module["_setStyles"] = createExportWrapper("setStyles", 3);
+  _setTone = Module["_setTone"] = createExportWrapper("setTone", 4);
+  _setStructure = Module["_setStructure"] = createExportWrapper("setStructure", 4);
+  _setMosh = Module["_setMosh"] = createExportWrapper("setMosh", 4);
+  _setTemporal = Module["_setTemporal"] = createExportWrapper("setTemporal", 4);
+  _pulse = Module["_pulse"] = createExportWrapper("pulse", 1);
   _main = Module["_main"] = createExportWrapper("main", 2);
   _emwgpuCreateBindGroup = createExportWrapper("emwgpuCreateBindGroup", 1);
   _emwgpuCreateBindGroupLayout = createExportWrapper("emwgpuCreateBindGroupLayout", 1);

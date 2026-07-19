@@ -83,6 +83,7 @@ struct VSOutput {
     @builtin(position) Position : vec4<f32>,
     @location(0) uv : vec2<f32>,
     @location(1) @interpolate(flat) layerIndex : i32,
+    @location(2) @interpolate(flat) instanceId : u32,
 };
 
 @vertex
@@ -107,6 +108,7 @@ fn vsTile(@builtin(vertex_index) vid : u32, @builtin(instance_index) instance : 
     out.Position = vec4<f32>(center + positions[vid] * tileScale, 0.0, 1.0);
     out.uv = uvs[vid];
     out.layerIndex = i32(tiles.layers[instance]);
+    out.instanceId = instance;
     return out;
 }
 )";
@@ -210,27 +212,37 @@ static float g_offsetY = 0.0f;
 static float g_speedX  = 0.1f;
 static float g_speedY  = 0.0f;
 
-// ========== Restructured Ikeda parameters ==========
+// ========== Render parameters (mirrors RenderParams in ikeda_shaders.cpp) ==========
 
-// Preprocessing parameters
-static int g_preprocessingMode = 1;    // 0=color, 1=black/white
-static float g_ikedaThreshold = 0.5f;  // black/white threshold for preprocessing
+static float g_globalTime  = 0.0f;
+static float g_eventPulse  = 0.0f;  // impulse energy, decays every frame
+static float g_strobe      = 0.0f;
+static float g_sceneMix    = 0.0f;
 
-// Postprocessing parameters
-static int g_postprocessingMode = 1;   // 0=grid, 1=data, 2=binary, 3=frequency, 4=scan, 5=matrix, 6=pulse, 7=noise, 8=strip, 9=phase, 10=quantum
-static float g_ikedaGridSize = 32.0f; // grid quantization size
-static float g_ikedaDataIntensity = 0.5f; // data overlay intensity
-static float g_globalTime = 0.0f;     // global time for animations
+static float g_styleA       = 2.0f; // BAYER
+static float g_styleB       = 8.0f; // HEX
+static float g_styleMixProb = 0.15f;
+static float g_threshold    = 0.5f;
 
-// Extended Ikeda parameters for new modes
-static float g_ikedaFrequency = 3.0f;      // frequency analysis parameter
-static float g_ikedaPhaseShift = 1.57f;    // phase shift for wave patterns (π/2)
-static float g_ikedaNoiseLevel = 0.5f;     // noise generation level
-static float g_ikedaStripWidth = 0.05f;    // strip decomposition width
-static float g_ikedaQuantumLevels = 8.0f;  // quantum state levels
-static float g_ikedaScanSpeed = 0.5f;      // scanning speed
-static float g_ikedaMatrixScale = 1.0f;    // matrix transformation scale
-static float g_ikedaPulseRate = 2.0f;      // pulse rhythm rate
+static float g_ditherScale = 3.0f;
+static float g_blockScale  = 14.0f;
+static float g_sliceAmp    = 0.15f;
+static float g_jitterAmp   = 0.3f;
+
+static float g_moshAmount    = 0.25f;
+static float g_moshBlock     = 0.035f;
+static float g_moshDrop      = 0.15f;
+static float g_feedbackDecay = 0.97f;
+
+static float g_invert      = 0.0f;
+static float g_gridOverlay = 0.5f;
+static float g_scanline    = 0.35f;
+static float g_noiseAmount = 0.08f;
+
+static float g_colorBleed = 0.0f;
+static float g_contrast   = 1.4f;
+
+static constexpr float kEventPulseHalfLifeMs = 220.0f;
 
 // ========== Data Structures & decode queue ==========
 
@@ -494,7 +506,7 @@ ImageFlasher::ImageFlasher(wgpu::Device dev, uint32_t ringSize, float switchInte
     bgle[3].binding = 3;
     bgle[3].visibility = wgpu::ShaderStage::Fragment;
     bgle[3].buffer.type = wgpu::BufferBindingType::Uniform;
-    bgle[3].buffer.minBindingSize = 64; // IkedaModeParams struct size
+    bgle[3].buffer.minBindingSize = 96; // RenderParams struct size
 
     wgpu::BindGroupLayoutDescriptor bglDesc = {};
     bglDesc.entryCount = 4;  // Restore 4 bindings for Ikeda shader
@@ -535,7 +547,7 @@ ImageFlasher::ImageFlasher(wgpu::Device dev, uint32_t ringSize, float switchInte
     e[2].sampler = sampler_;
     e[3].binding = 3;
     e[3].buffer = ikedaUniformBuffer;
-    e[3].size = 64;
+    e[3].size = 96;
     wgpu::BindGroupDescriptor bgd = {};
     bgd.layout = bindGroupLayout_;
     bgd.entryCount = 4;
@@ -728,7 +740,7 @@ extern "C" void initializeSurfaceAndPipeline() {
     // Create ikedaUniformBuffer before ImageFlasher constructor
     {
         wgpu::BufferDescriptor bd = {};
-        bd.size  = 16 * sizeof(float); // 1 int + 15 floats = 64 bytes
+        bd.size  = 24 * sizeof(float); // RenderParams: 24 floats = 96 bytes
         bd.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
         ikedaUniformBuffer = device.CreateBuffer(&bd);
     }
@@ -770,8 +782,12 @@ extern "C" void initializeSurfaceAndPipeline() {
             imageFlasher->setDeltaTime((float)dt);
         }
 
-        // update global time for Ikeda animations
+        // advance global time and decay event energy toward zero
         g_globalTime = (float)(time * 0.001); // convert to seconds
+        if (dt > 0.0) {
+            g_eventPulse *= std::exp2(-(float)dt / kEventPulseHalfLifeMs);
+            if (g_eventPulse < 0.001f) g_eventPulse = 0.0f;
+        }
         updateIkedaUniforms();
 
         // scroll offset
@@ -858,7 +874,7 @@ extern "C" void initializeSurfaceAndPipeline() {
                 e[3].sampler     = commonSampler;
                 e[4].binding     = 4; // ikeda uniform
                 e[4].buffer      = ikedaUniformBuffer;
-                e[4].size        = 64; // IkedaModeParams struct size
+                e[4].size        = 96; // RenderParams struct size
 
                 wgpu::BindGroupDescriptor bd = {};
                 bd.layout     = bgl;
@@ -898,7 +914,7 @@ extern "C" void initializeSurfaceAndPipeline() {
                 e[2].size         = 2*sizeof(float);
                 e[3].binding      = 3;
                 e[3].buffer       = ikedaUniformBuffer;
-                e[3].size         = 64; // IkedaModeParams struct size
+                e[3].size         = 96; // RenderParams struct size
 
                 wgpu::BindGroupDescriptor bd = {};
                 bd.layout     = bgl;
@@ -957,53 +973,46 @@ void decodeWorkerFunc() {
     }
 }
 
-// Helper function to update Ikeda uniforms
+// Upload the shared RenderParams uniform (must match ikeda_shaders.cpp layout).
 void updateIkedaUniforms() {
     if (!ikedaUniformBuffer) return;
-    
-    struct IkedaModeParams {
-        int32_t preprocessingMode;
-        int32_t postprocessingMode;
-        float threshold;
-        float gridSize;
-        float dataIntensity;
-        float time;
-        float canvasWidth;
-        float canvasHeight;
-        
-        // Extended parameters to match shader exactly
-        float frequency;
-        float phaseShift;
-        float noiseLevel;
-        float stripWidth;
-        float quantumLevels;
-        float scanSpeed;
-        float matrixScale;
-        float pulseRate;
-        // No explicit padding - GPU handles 16-byte alignment automatically
-        // Struct: 64 bytes, Buffer: 64 bytes (GPU-aligned)
-    } ikedaData;
-    
-    ikedaData.preprocessingMode = g_preprocessingMode;
-    ikedaData.postprocessingMode = g_postprocessingMode;
-    ikedaData.threshold = g_ikedaThreshold;
-    ikedaData.gridSize = g_ikedaGridSize;
-    ikedaData.dataIntensity = g_ikedaDataIntensity;
-    ikedaData.time = g_globalTime;
-    ikedaData.canvasWidth = (float)g_canvasWidth;
-    ikedaData.canvasHeight = (float)g_canvasHeight;
-    
-    // Set extended parameters
-    ikedaData.frequency = g_ikedaFrequency;
-    ikedaData.phaseShift = g_ikedaPhaseShift;
-    ikedaData.noiseLevel = g_ikedaNoiseLevel;
-    ikedaData.stripWidth = g_ikedaStripWidth;
-    ikedaData.quantumLevels = g_ikedaQuantumLevels;
-    ikedaData.scanSpeed = g_ikedaScanSpeed;
-    ikedaData.matrixScale = g_ikedaMatrixScale;
-    ikedaData.pulseRate = g_ikedaPulseRate;
-    
-    queue.WriteBuffer(ikedaUniformBuffer, 0, &ikedaData, sizeof(ikedaData));
+
+    struct RenderParams {
+        float time, eventPulse, strobe, sceneMix;
+        float styleA, styleB, styleMixProb, threshold;
+        float ditherScale, blockScale, sliceAmp, jitterAmp;
+        float moshAmount, moshBlock, moshDrop, feedbackDecay;
+        float invert, gridOverlay, scanline, noiseAmount;
+        float canvasWidth, canvasHeight, colorBleed, contrast;
+    } p;
+    static_assert(sizeof(RenderParams) == 96, "RenderParams must stay 96 bytes");
+
+    p.time = g_globalTime;
+    p.eventPulse = g_eventPulse;
+    p.strobe = g_strobe;
+    p.sceneMix = g_sceneMix;
+    p.styleA = g_styleA;
+    p.styleB = g_styleB;
+    p.styleMixProb = g_styleMixProb;
+    p.threshold = g_threshold;
+    p.ditherScale = g_ditherScale;
+    p.blockScale = g_blockScale;
+    p.sliceAmp = g_sliceAmp;
+    p.jitterAmp = g_jitterAmp;
+    p.moshAmount = g_moshAmount;
+    p.moshBlock = g_moshBlock;
+    p.moshDrop = g_moshDrop;
+    p.feedbackDecay = g_feedbackDecay;
+    p.invert = g_invert;
+    p.gridOverlay = g_gridOverlay;
+    p.scanline = g_scanline;
+    p.noiseAmount = g_noiseAmount;
+    p.canvasWidth = (float)g_canvasWidth;
+    p.canvasHeight = (float)g_canvasHeight;
+    p.colorBleed = g_colorBleed;
+    p.contrast = g_contrast;
+
+    queue.WriteBuffer(ikedaUniformBuffer, 0, &p, sizeof(p));
 }
 
 // EMSCRIPTEN exports
@@ -1073,120 +1082,53 @@ void setScrollingOffset(float ox, float oy) {
     std::cout << "[INFO] setScrollingOffset(" << ox << ", " << oy << ")\n";
 }
 
-// ========== Restructured Pipeline Functions ==========
+// ========== Render parameter API (called from app.js) ==========
 
+// Tile materials: 0 RAW, 1 THRESH, 2 BAYER, 3 EDGE, 4 SORT, 5 SLICE,
+//                 6 WAVE, 7 BARCODE, 8 HEX, 9 BLOCKS
 EMSCRIPTEN_KEEPALIVE
-void setPreprocessingMode(int mode) {
-    g_preprocessingMode = mode;
-    updateIkedaUniforms();
-    std::cout << "[INFO] setPreprocessingMode(" << mode << ")\n";
+void setStyles(int styleA, int styleB, float mixProb) {
+    g_styleA = (float)std::clamp(styleA, 0, 9);
+    g_styleB = (float)std::clamp(styleB, 0, 9);
+    g_styleMixProb = std::clamp(mixProb, 0.0f, 1.0f);
 }
 
 EMSCRIPTEN_KEEPALIVE
-void setPostprocessingMode(int mode) {
-    g_postprocessingMode = mode;
-    updateIkedaUniforms();
-    std::cout << "[INFO] setPostprocessingMode(" << mode << ")\n";
+void setTone(float threshold, float contrast, float colorBleed, float jitter) {
+    g_threshold  = std::clamp(threshold, 0.0f, 1.0f);
+    g_contrast   = std::clamp(contrast, 0.1f, 4.0f);
+    g_colorBleed = std::clamp(colorBleed, 0.0f, 1.0f);
+    g_jitterAmp  = std::clamp(jitter, 0.0f, 1.0f);
 }
 
 EMSCRIPTEN_KEEPALIVE
-void setIkedaThreshold(float threshold) {
-    g_ikedaThreshold = threshold;
-    updateIkedaUniforms();
-    std::cout << "[INFO] setIkedaThreshold(" << threshold << ")\n";
+void setStructure(float ditherScale, float blockScale, float sliceAmp, float grid) {
+    g_ditherScale = std::clamp(ditherScale, 1.0f, 16.0f);
+    g_blockScale  = std::clamp(blockScale, 6.0f, 48.0f);
+    g_sliceAmp    = std::clamp(sliceAmp, 0.0f, 1.0f);
+    g_gridOverlay = std::clamp(grid, 0.0f, 1.0f);
 }
 
 EMSCRIPTEN_KEEPALIVE
-void setIkedaGridSize(float gridSize) {
-    g_ikedaGridSize = gridSize;
-    updateIkedaUniforms();
-    std::cout << "[INFO] setIkedaGridSize(" << gridSize << ")\n";
+void setMosh(float amount, float block, float drop, float decay) {
+    g_moshAmount    = std::clamp(amount, 0.0f, 1.0f);
+    g_moshBlock     = std::clamp(block, 0.004f, 0.25f);
+    g_moshDrop      = std::clamp(drop, 0.0f, 1.0f);
+    g_feedbackDecay = std::clamp(decay, 0.5f, 1.0f);
 }
 
 EMSCRIPTEN_KEEPALIVE
-void setIkedaDataIntensity(float intensity) {
-    g_ikedaDataIntensity = intensity;
-    updateIkedaUniforms();
-    std::cout << "[INFO] setIkedaDataIntensity(" << intensity << ")\n";
+void setTemporal(float scanline, float noise, float strobe, float invert) {
+    g_scanline    = std::clamp(scanline, 0.0f, 1.0f);
+    g_noiseAmount = std::clamp(noise, 0.0f, 1.0f);
+    g_strobe      = std::clamp(strobe, 0.0f, 1.0f);
+    g_invert      = std::clamp(invert, 0.0f, 1.0f);
 }
 
-// ========== Extended Ikeda Mode Functions ==========
-
+// Inject event energy: spikes mosh, slice glitch, and tile negatives, then decays.
 EMSCRIPTEN_KEEPALIVE
-void setIkedaFrequency(float frequency) {
-    g_ikedaFrequency = frequency;
-    updateIkedaUniforms();
-    std::cout << "[INFO] setIkedaFrequency(" << frequency << ")\n";
-}
-
-EMSCRIPTEN_KEEPALIVE
-void setIkedaPhaseShift(float phaseShift) {
-    g_ikedaPhaseShift = phaseShift;
-    updateIkedaUniforms();
-    std::cout << "[INFO] setIkedaPhaseShift(" << phaseShift << ")\n";
-}
-
-EMSCRIPTEN_KEEPALIVE
-void setIkedaNoiseLevel(float noiseLevel) {
-    g_ikedaNoiseLevel = noiseLevel;
-    updateIkedaUniforms();
-    std::cout << "[INFO] setIkedaNoiseLevel(" << noiseLevel << ")\n";
-}
-
-EMSCRIPTEN_KEEPALIVE
-void setIkedaStripWidth(float stripWidth) {
-    g_ikedaStripWidth = stripWidth;
-    updateIkedaUniforms();
-    std::cout << "[INFO] setIkedaStripWidth(" << stripWidth << ")\n";
-}
-
-EMSCRIPTEN_KEEPALIVE
-void setIkedaQuantumLevels(float quantumLevels) {
-    g_ikedaQuantumLevels = quantumLevels;
-    updateIkedaUniforms();
-    std::cout << "[INFO] setIkedaQuantumLevels(" << quantumLevels << ")\n";
-}
-
-EMSCRIPTEN_KEEPALIVE
-void setIkedaScanSpeed(float scanSpeed) {
-    g_ikedaScanSpeed = scanSpeed;
-    updateIkedaUniforms();
-    std::cout << "[INFO] setIkedaScanSpeed(" << scanSpeed << ")\n";
-}
-
-EMSCRIPTEN_KEEPALIVE
-void setIkedaMatrixScale(float matrixScale) {
-    g_ikedaMatrixScale = matrixScale;
-    updateIkedaUniforms();
-    std::cout << "[INFO] setIkedaMatrixScale(" << matrixScale << ")\n";
-}
-
-EMSCRIPTEN_KEEPALIVE
-void setIkedaPulseRate(float pulseRate) {
-    g_ikedaPulseRate = pulseRate;
-    updateIkedaUniforms();
-    std::cout << "[INFO] setIkedaPulseRate(" << pulseRate << ")\n";
-}
-
-EMSCRIPTEN_KEEPALIVE
-float getImageAverageLuminance() {
-    // For now, return a placeholder value
-    // This would be filled with actual image analysis
-    return 127.5f;
-}
-
-EMSCRIPTEN_KEEPALIVE
-float getImageEntropy() {
-    // For now, return a placeholder value
-    // This would be filled with actual image analysis
-    return 4.5f;
-}
-
-EMSCRIPTEN_KEEPALIVE
-float getImageVariance() {
-    // For now, return a placeholder value
-    // This would be filled with actual image analysis
-    return 2500.0f;
+void pulse(float strength) {
+    g_eventPulse = std::clamp(g_eventPulse + strength, 0.0f, 1.5f);
 }
 
 } // extern "C"
@@ -1417,7 +1359,7 @@ void createPipelineFade() {
     bglEntries[4].binding    = 4;
     bglEntries[4].visibility = wgpu::ShaderStage::Fragment;
     bglEntries[4].buffer.type= wgpu::BufferBindingType::Uniform;
-    bglEntries[4].buffer.minBindingSize = 64; // IkedaModeParams struct size
+    bglEntries[4].buffer.minBindingSize = 96; // RenderParams struct size
 
     wgpu::BindGroupLayoutDescriptor bglDesc = {};
     bglDesc.entryCount = 5;
@@ -1488,7 +1430,7 @@ void createPipelinePresent() {
     bglEntries[3].binding    = 3;
     bglEntries[3].visibility = wgpu::ShaderStage::Fragment;
     bglEntries[3].buffer.type= wgpu::BufferBindingType::Uniform;
-    bglEntries[3].buffer.minBindingSize = 64; // IkedaModeParams struct size
+    bglEntries[3].buffer.minBindingSize = 96; // RenderParams struct size
 
     wgpu::BindGroupLayoutDescriptor bglDesc = {};
     bglDesc.entryCount = 4;
