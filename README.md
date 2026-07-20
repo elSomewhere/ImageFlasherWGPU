@@ -94,11 +94,12 @@ Open `http://localhost:8000` for the **DATAVALANCHE** presentation. The canvas i
 |-----|--------|
 | `H` | Toggle control panel |
 | `A` | Toggle sonification |
+| `D` | Debug / neutral mode: images exactly as collected |
 | `SPACE` | Cut to a new scene |
 | `P` | Fire a glitch pulse |
 | `I` | Momentary invert flash |
 | `F` | Toggle fullscreen |
-| `0-7` | Jump to scene by index |
+| `0-8` | Jump to scene by index |
 
 ## 🎨 Presentation Layer
 
@@ -117,15 +118,23 @@ Each tile renders its ring-buffer image through one of 10 monochrome materials; 
 | 7 | BARCODE | columns collapsed to stripes |
 | 8 | HEX | image blocks printed as hex glyphs |
 | 9 | BLOCKS | hard mosaic with dropout |
+| 10 | BITPLANE | single extracted bit-plane of luma |
+| 11 | CONTOUR | quantized luma iso-lines |
 
 ### Datamosh feedback
 The frame-blend pass is a mosh engine: the previous frame is re-sampled through block displacement ("broken motion vectors", re-rolled 7×/s) and per-block **P-frame drops** that hold stale image data with luminance decay. Arriving artifacts and scene cuts inject event energy that spikes the mosh and shears the frame.
 
 ### Global composition
-Scanlines + rolling sync bar, hairline grid, sparse bit-flip noise, binary timecode strip, strobe/invert, hard mono enforcement (optional color bleed). Scenes: HALFTONE FIELD, BINARY WALL, WIREFRAME, MELT, READOUT, HEX RAIN, AVALANCHE, STATIC.
+Scanlines + rolling sync bar, hairline grid, sparse bit-flip noise, a binary strip counting the clock (left) and the crawl sequence (right), strobe/invert, hard mono enforcement (optional color bleed). Fresh tile switches flash white (age-driven), tiles can carry contact-sheet gutters and ring-slot stamps. Scenes: HALFTONE FIELD, BINARY WALL, WIREFRAME, MELT, READOUT, HEX RAIN, AVALANCHE, STATIC, ARCHIVE. The conductor also fires REVEAL moments (the raw images momentarily surface through the abstraction) and hard blackout/dropout cuts.
+
+### Debug / neutral mode
+`D` (or the DEBUG button) bypasses the whole treatment chain: original color images exactly as collected, tiled as a contact sheet with gutters and slot stamps, no mosh, no overlays — a live view for verifying what the crawler brings home. Toggling back restores the previous scene and auto-evolution.
+
+### Sonification
+All layers run behind a limiter and follow per-scene sound profiles: clicks per crawled artifact (stereo-placed by sequence), a **granular texture cut live from the raw bytes of recent artifacts**, an analysis-pitched sine grid (luminance→pitch, entropy→duration), sub pulses and a pitch-dropping kick on scene cuts, plus crawl-telemetry sonics — new-domain three-tone pings, frontier size driving the noise bed, and the accept/reject ratio thinning the grid. Visual glitches quantize to the audio's 16th-note grid when sound is on.
 
 ### Render parameter API (WASM exports)
-`setStyles(a,b,prob)` · `setTone(threshold,contrast,colorBleed,jitter)` · `setStructure(dither,block,sliceAmp,grid)` · `setMosh(amount,block,drop,decay)` · `setTemporal(scanline,noise,strobe,invert)` · `pulse(strength)` plus the flow controls (`setFadeFactor`, `setImageSwitchInterval`, `setTileFactor`, `setRandomTileFraction`, `setScrollingSpeed`, `setMaxUploadsPerFrame`). All share one 96-byte `RenderParams` uniform bound in every pass.
+`setStyles(a,b,prob)` · `setTone(threshold,contrast,colorBleed,jitter)` · `setStructure(dither,block,sliceAmp,grid)` · `setMosh(amount,block,drop,decay)` · `setTemporal(scanline,noise,strobe,invert)` · `setAccents(flash,gutter)` · `setBypass(mix)` · `setSequence(seq)` · `pulse(strength)` plus the flow controls (`setFadeFactor`, `setImageSwitchInterval`, `setTileFactor`, `setRandomTileFraction`, `setScrollingSpeed`, `setMaxUploadsPerFrame`). All share one 112-byte `RenderParams` uniform bound in every pass.
 
 ## 🏗️ Development
 

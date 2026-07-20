@@ -33,7 +33,7 @@ struct RenderParams {
     time : f32,          // seconds
     eventPulse : f32,    // 0..1 impulse, decays in C++
     strobe : f32,        // 0..1 strobe intensity
-    sceneMix : f32,      // reserved for scene crossfades
+    bypass : f32,        // 0..1 neutral blend: 1 = raw images, no treatment
 
     styleA : f32,        // primary tile material id
     styleB : f32,        // secondary tile material id
@@ -58,7 +58,12 @@ struct RenderParams {
     canvasWidth : f32,
     canvasHeight : f32,
     colorBleed : f32,    // 0 = strict mono, 1 = source color
-    contrast : f32       // luma contrast around 0.5
+    contrast : f32,      // luma contrast around 0.5
+
+    flashBoost : f32,    // white flash strength on fresh tile switches
+    tileGutter : f32,    // black gutter between tiles (contact-sheet look)
+    sequenceLow : f32,   // low 16 bits of the latest artifact sequence
+    reserved0 : f32
 }
 
 fn luma(c : vec3<f32>) -> f32 {
@@ -139,7 +144,8 @@ fn fsImage(
     @builtin(position) fragPos : vec4<f32>,
     @location(0) uv : vec2<f32>,
     @location(1) @interpolate(flat) layerIndex : i32,
-    @location(2) @interpolate(flat) instanceId : u32
+    @location(2) @interpolate(flat) instanceId : u32,
+    @location(3) @interpolate(flat) tileAge : f32
 ) -> @location(0) vec4<f32> {
     let inst = f32(instanceId);
     let tileSeed = hash11(inst * 17.13 + 0.37);          // stable per tile
@@ -234,17 +240,57 @@ fn fsImage(
             let drop = step(0.92, hash21(cell + floor(P.time * 3.0) * 0.31 + inst));
             outv = floor(v * 3.0) / 2.0 * (1.0 - drop);
         }
+        case 10: { // BITPLANE: single extracted bit-plane of luma
+            let plane = (u32(tileSeed * 7.99) + u32(P.time * 0.4)) % 8u;
+            let bits = u32(clamp(g, 0.0, 1.0) * 255.0);
+            outv = f32((bits >> plane) & 1u);
+        }
+        case 11: { // CONTOUR: quantized luma iso-lines
+            let levels = 7.0;
+            let q = g * levels;
+            let d = min(fract(q), 1.0 - fract(q));
+            let line = 1.0 - step(0.09, d);
+            let fill = floor(q) / levels * 0.18; // faint terraced fill under the lines
+            outv = max(line, fill);
+        }
         default: {
             outv = g;
         }
     }
 
+    let live = 1.0 - clamp(P.bypass, 0.0, 1.0);
+
     // Occasional per-tile negative on fresh switches, driven by event energy.
-    let neg = step(0.85, flashSeed) * clamp(P.eventPulse * 2.0, 0.0, 1.0);
+    let neg = step(0.85, flashSeed) * clamp(P.eventPulse * 2.0, 0.0, 1.0) * live;
     outv = mix(outv, 1.0 - outv, neg);
 
+    // Fresh-switch white flash: the moment of arrival made visible.
+    let flash = P.flashBoost * exp(-tileAge / 2.5) * live;
+    outv = mix(outv, 1.0, clamp(flash, 0.0, 1.0));
+
     let mono = vec3<f32>(outv);
-    let outc = mix(mono, srcColor.rgb * outv, P.colorBleed);
+    var outc = mix(mono, srcColor.rgb * outv, P.colorBleed);
+
+    // Neutral blend: pull toward the raw image as collected.
+    outc = mix(outc, srcColor.rgb, clamp(P.bypass, 0.0, 1.0));
+
+    // Ring-slot stamp: 8-bit binary strip along the tile's bottom edge.
+    if (P.gridOverlay > 0.001 && uv.y > 0.94 && uv.y < 0.985 && uv.x > 0.06 && uv.x < 0.94) {
+        let cells = 8.0;
+        let cx = (uv.x - 0.06) / 0.88;
+        let idx = u32(clamp(floor(cx * cells), 0.0, cells - 1.0));
+        let bit = (u32(layerIndex) >> idx) & 1u;
+        let inCell = step(0.2, fract(cx * cells)) * step(fract(cx * cells), 0.8);
+        outc = mix(outc, vec3<f32>(f32(bit)), P.gridOverlay * inCell * 0.85);
+    }
+
+    // Contact-sheet gutter between tiles.
+    let e = P.tileGutter * 0.03;
+    if (e > 0.0001) {
+        let border = step(uv.x, e) + step(1.0 - e, uv.x) + step(uv.y, e) + step(1.0 - e, uv.y);
+        outc = outc * (1.0 - clamp(border, 0.0, 1.0));
+    }
+
     return vec4<f32>(outc, 1.0);
 }
 )";
@@ -265,32 +311,41 @@ struct FadeParams {
 
 @fragment
 fn fsFade(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
+    let live = 1.0 - clamp(P.bypass, 0.0, 1.0);
     let bs = max(P.moshBlock, 0.004);
     let block = floor(uv / bs);
     let roll = floor(P.time * 7.0); // re-roll displacement 7x/s
 
     // Event pulses spike the mosh hard: the crawl "hitting" the frame.
-    let amt = P.moshAmount * (1.0 + P.eventPulse * 5.0);
+    let amt = P.moshAmount * (1.0 + P.eventPulse * 5.0) * live;
 
     // Broken motion vectors: some blocks fetch the old frame from elsewhere.
     var moshUV = uv;
     let r = hash21(block + roll * 0.117);
+    let r2 = hash21(block * 4.7 + roll * 0.31);
     if (r < 0.5 * clamp(amt * 4.0, 0.0, 1.0)) {
-        let dir = vec2<f32>(
-            hash21(block * 1.7 + roll) - 0.5,
-            (hash21(block * 2.3 + roll) - 0.5) * 0.4
-        );
-        moshUV = uv + dir * amt * bs * 24.0;
+        if (r2 < 0.45) {
+            // continuous smear: the block slides sideways, P-frame melt style
+            let dir = sign(r2 - 0.22);
+            moshUV.x = uv.x - dir * amt * 0.22 * fract(P.time * (0.25 + r2 * 0.9));
+        } else {
+            // rectangular jump, horizontally biased
+            let dir = vec2<f32>(
+                hash21(block * 1.7 + roll) - 0.5,
+                (hash21(block * 2.3 + roll) - 0.5) * 0.3
+            );
+            moshUV = uv + dir * amt * bs * 24.0;
+        }
     }
 
     let cOld = textureSampleLevel(oldFrame, s, clamp(moshUV, vec2<f32>(0.0), vec2<f32>(1.0)), 0.0);
     let cNew = textureSampleLevel(newFrame, s, uv, 0.0);
 
     // P-frame drop: a block refuses new data and decays on stale content.
-    let hold = step(hash21(block * 3.1 + roll * 0.71), P.moshDrop);
+    let hold = step(hash21(block * 3.1 + roll * 0.71), P.moshDrop * live);
     let f = fadeParam.fade * (1.0 - hold);
 
-    let held = cOld * P.feedbackDecay;
+    let held = cOld * mix(P.feedbackDecay, 1.0, clamp(P.bypass, 0.0, 1.0));
     return vec4<f32>(mix(held.rgb, cNew.rgb, f), 1.0);
 }
 )";
@@ -314,9 +369,10 @@ fn fsPresent(
     @location(0) uv : vec2<f32>
 ) -> @location(0) vec4<f32> {
     var suv = fract(uv + scrollParam.offset);
+    let live = 1.0 - clamp(P.bypass, 0.0, 1.0);
 
     // Event-driven slice glitch: horizontal strips shear on pulses.
-    let pulse = clamp(P.eventPulse, 0.0, 1.0);
+    let pulse = clamp(P.eventPulse, 0.0, 1.0) * live;
     if (pulse > 0.01) {
         let band = floor(suv.y * 28.0);
         let roll = floor(P.time * 18.0);
@@ -329,51 +385,61 @@ fn fsPresent(
     var g = luma(base.rgb);
 
     // Scanlines + rolling sync bar.
-    if (P.scanline > 0.001) {
+    let scan = P.scanline * live;
+    if (scan > 0.001) {
         let line = 0.5 + 0.5 * sin(fragPos.y * 3.14159);
-        g = g * (1.0 - P.scanline * 0.35 * line);
+        g = g * (1.0 - scan * 0.35 * line);
         let barPos = fract(P.time * 0.11);
         let dy = abs(uv.y - barPos);
-        g = g + P.scanline * 0.5 * exp(-dy * 220.0);       // bright leading edge
-        g = g * (1.0 - P.scanline * 0.5 * exp(-dy * 40.0) * step(uv.y, barPos)); // dark wake
+        g = g + scan * 0.5 * exp(-dy * 220.0);       // bright leading edge
+        g = g * (1.0 - scan * 0.5 * exp(-dy * 40.0) * step(uv.y, barPos)); // dark wake
     }
 
     // Bit noise: sparse hard white/black flips.
-    if (P.noiseAmount > 0.001) {
+    let noiseAmt = P.noiseAmount * live;
+    if (noiseAmt > 0.001) {
         let n = hash21(fragPos.xy + fract(P.time * 977.0) * 100.0);
-        let flip = step(1.0 - P.noiseAmount * 0.12, n);
+        let flip = step(1.0 - noiseAmt * 0.12, n);
         let val = step(0.5, hash21(fragPos.yx + P.time));
         g = mix(g, val, flip);
     }
 
     // Hairline grid.
-    if (P.gridOverlay > 0.001) {
+    let gridAmt = P.gridOverlay * live;
+    if (gridAmt > 0.001) {
         let cell = 96.0;
         let gx = step(fract(fragPos.x / cell), 1.0 / cell);
         let gy = step(fract(fragPos.y / cell), 1.0 / cell);
-        g = g + (gx + gy) * 0.10 * P.gridOverlay;
+        g = g + (gx + gy) * 0.10 * gridAmt;
     }
 
-    // Binary timecode strip along the bottom edge: u32 millis as cells.
-    if (P.gridOverlay > 0.001 && uv.y > 1.0 - 12.0 / max(P.canvasHeight, 1.0)) {
-        let bits = 32.0;
-        let idx = u32(clamp(floor(uv.x * bits), 0.0, bits - 1.0));
-        let t = u32(P.time * 100.0);
-        let bit = (t >> idx) & 1u;
-        let inCell = step(0.15, fract(uv.x * bits)) * step(fract(uv.x * bits), 0.85);
-        g = mix(g, f32(bit), P.gridOverlay * inCell * 0.9);
+    // Binary strip along the bottom edge: left half counts the clock,
+    // right half counts the crawl (latest artifact sequence).
+    if (gridAmt > 0.001 && uv.y > 1.0 - 12.0 / max(P.canvasHeight, 1.0)) {
+        var value = u32(P.time * 100.0) & 0xFFFFu;
+        var cx = uv.x * 2.0;
+        if (uv.x >= 0.5) {
+            value = u32(P.sequenceLow) & 0xFFFFu;
+            cx = (uv.x - 0.5) * 2.0;
+        }
+        let bits = 16.0;
+        let idx = u32(clamp(floor(cx * bits), 0.0, bits - 1.0));
+        let bit = (value >> idx) & 1u;
+        let inCell = step(0.15, fract(cx * bits)) * step(fract(cx * bits), 0.85);
+        g = mix(g, f32(bit), gridAmt * inCell * 0.9);
     }
 
     // Strobe: hard photic flicker, gated so it stays rhythmic not constant.
-    var inv = clamp(P.invert, 0.0, 1.0);
-    if (P.strobe > 0.001) {
-        let gate = step(0.5, fract(P.time * 9.0)) * step(fract(P.time * 0.618), P.strobe);
+    var inv = clamp(P.invert, 0.0, 1.0) * live;
+    let strobeAmt = P.strobe * live;
+    if (strobeAmt > 0.001) {
+        let gate = step(0.5, fract(P.time * 9.0)) * step(fract(P.time * 0.618), strobeAmt);
         inv = clamp(inv + gate, 0.0, 1.0);
     }
     g = mix(g, 1.0 - g, inv);
 
     let mono = vec3<f32>(clamp(g, 0.0, 1.0));
-    let outc = mix(mono, base.rgb, P.colorBleed * 0.6);
+    let outc = mix(mono, base.rgb, max(P.colorBleed * 0.6, clamp(P.bypass, 0.0, 1.0)));
     return vec4<f32>(outc, 1.0);
 }
 )";

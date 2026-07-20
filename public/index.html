@@ -196,11 +196,25 @@
     #panel::-webkit-scrollbar { width: 4px; }
     #panel::-webkit-scrollbar-track { background: #000; }
     #panel::-webkit-scrollbar-thumb { background: #333; }
+
+    /* hard-cut blackout layer (audio dropouts) */
+    #blackout {
+      position: absolute;
+      inset: 0;
+      background: #000;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 60ms steps(2, end);
+      z-index: 18;
+    }
+    #blackout.on { opacity: 1; }
   </style>
 </head>
 <body>
 
 <canvas id="canvas"></canvas>
+
+<div id="blackout"></div>
 
 <div id="sceneFlash"></div>
 
@@ -216,7 +230,7 @@
   <span>CRAWL <b id="crawlerStatusLabel">--</b></span>
 </div>
 
-<div id="hint">H&nbsp;PANEL&nbsp;&middot;&nbsp;A&nbsp;SOUND&nbsp;&middot;&nbsp;SPACE&nbsp;CUT</div>
+<div id="hint">H&nbsp;PANEL&nbsp;&middot;&nbsp;A&nbsp;SOUND&nbsp;&middot;&nbsp;SPACE&nbsp;CUT&nbsp;&middot;&nbsp;D&nbsp;DEBUG</div>
 
 <div id="panel">
   <h1>DATAVALANCHE</h1>
@@ -234,6 +248,7 @@
   <div class="row">
     <button id="nextScene">CUT &gt;</button>
     <button id="pulseBtn">PULSE</button>
+    <button id="debugToggle">DEBUG</button>
   </div>
 
   <h2>Audio</h2>
@@ -308,6 +323,16 @@
     <label>Grid/HUD</label>
     <input type="range" id="grid" min="0" max="1" step="0.01" value="0.5">
     <span class="v" id="gridVal">0.50</span>
+  </div>
+  <div class="row">
+    <label>Flash</label>
+    <input type="range" id="flashBoost" min="0" max="1" step="0.01" value="0.6">
+    <span class="v" id="flashBoostVal">0.60</span>
+  </div>
+  <div class="row">
+    <label>Gutter</label>
+    <input type="range" id="gutter" min="0" max="1" step="0.01" value="0">
+    <span class="v" id="gutterVal">0.00</span>
   </div>
 
   <h2>Mosh</h2>

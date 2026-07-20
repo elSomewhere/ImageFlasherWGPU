@@ -2,8 +2,10 @@
 //
 // - artifact stream: unchanged wire protocol (length-prefixed JSON header + payload)
 // - engine: cwrap bindings for the RenderParams API in main.cpp
-// - AudioEngine: data sonification (clicks, raw-byte PCM bursts, sine grid, subs)
-// - Conductor: autonomous scene evolution so the piece runs config-free
+// - AudioEngine: data sonification — clicks, granular texture from raw artifact
+//   bytes, analysis-pitched sine grid, subs/kicks, crawl-telemetry sonics
+// - Conductor: autonomous scene evolution, reveals, dropouts, beat-locked glitches
+// - Debug mode: neutral bypass showing the images exactly as collected
 // - panel: minimal hidden control surface + crawler steering
 
 Module['onRuntimeInitialized'] = () => {
@@ -49,6 +51,9 @@ Module['onRuntimeInitialized'] = () => {
         setStructure:         Module.cwrap('setStructure', null, ['number', 'number', 'number', 'number']),
         setMosh:              Module.cwrap('setMosh', null, ['number', 'number', 'number', 'number']),
         setTemporal:          Module.cwrap('setTemporal', null, ['number', 'number', 'number', 'number']),
+        setAccents:           Module.cwrap('setAccents', null, ['number', 'number']),
+        setBypass:            Module.cwrap('setBypass', null, ['number']),
+        setSequence:          Module.cwrap('setSequence', null, ['number']),
         pulse:                Module.cwrap('pulse', null, ['number']),
         setFadeFactor:        Module.cwrap('setFadeFactor', null, ['number']),
         setImageSwitchInterval: Module.cwrap('setImageSwitchInterval', null, ['number']),
@@ -61,8 +66,8 @@ Module['onRuntimeInitialized'] = () => {
     };
 
     const STYLE_NAMES = [
-        'RAW', 'THRESH', 'BAYER', 'EDGE', 'SORT',
-        'SLICE', 'WAVE', 'BARCODE', 'HEX', 'BLOCKS'
+        'RAW', 'THRESH', 'BAYER', 'EDGE', 'SORT', 'SLICE',
+        'WAVE', 'BARCODE', 'HEX', 'BLOCKS', 'BITPLANE', 'CONTOUR'
     ];
 
     // Central parameter state; every push reads from here.
@@ -73,17 +78,21 @@ Module['onRuntimeInitialized'] = () => {
         moshAmount: 0.25, moshBlock: 0.035, moshDrop: 0.15, moshDecay: 0.97,
         scanline: 0.35, noise: 0.08, strobe: 0, invert: 0,
         fade: 0.5, switchInterval: 0.33, tileFactor: 3, tileFraction: 0.5,
-        scrollX: 0.06, scrollY: 0, uploads: 0
+        scrollX: 0.06, scrollY: 0, uploads: 0,
+        flashBoost: 0.6, gutter: 0
     };
 
     // Drift offsets applied on top of state by the conductor (visual breathing).
     const drift = { threshold: 0, moshAmount: 0, sliceAmp: 0 };
+
+    function clamp01(x) { return Math.min(1, Math.max(0, x)); }
 
     function pushStyles()    { engine.setStyles(state.styleA, state.styleB, state.styleMix); }
     function pushTone()      { engine.setTone(clamp01(state.threshold + drift.threshold), state.contrast, state.colorBleed, state.jitter); }
     function pushStructure() { engine.setStructure(state.dither, state.blockScale, clamp01(state.sliceAmp + drift.sliceAmp), state.grid); }
     function pushMosh()      { engine.setMosh(clamp01(state.moshAmount + drift.moshAmount), state.moshBlock, state.moshDrop, state.moshDecay); }
     function pushTemporal()  { engine.setTemporal(state.scanline, state.noise, state.strobe, state.invert); }
+    function pushAccents()   { engine.setAccents(state.flashBoost, state.gutter); }
     function pushFlow() {
         engine.setFadeFactor(state.fade);
         engine.setImageSwitchInterval(state.switchInterval);
@@ -92,25 +101,38 @@ Module['onRuntimeInitialized'] = () => {
         engine.setScrollingSpeed(state.scrollX, state.scrollY);
         engine.setMaxUploadsPerFrame(state.uploads);
     }
-    function pushAll() { pushStyles(); pushTone(); pushStructure(); pushMosh(); pushTemporal(); pushFlow(); }
-
-    function clamp01(x) { return Math.min(1, Math.max(0, x)); }
+    function pushAll() { pushStyles(); pushTone(); pushStructure(); pushMosh(); pushTemporal(); pushAccents(); pushFlow(); }
 
     // ------------------------------------------------------------------
     // AudioEngine: the crawl made audible
     // ------------------------------------------------------------------
+    const DEFAULT_PROFILE = {
+        bpm: 128,
+        pitchSet: [1244.5, 1661.2, 2217.5, 2960.0, 3951.1, 5274.0, 7040.0],
+        gridProb: 0.7,     // sine-grid blip probability per 16th
+        clickProb: 0.2,    // extra click probability per 16th
+        grainProb: 0.5,    // data-grain probability per 16th
+        subPattern: false, // 8th-note sub pulse
+        grainPitch: 1.0,   // playback-rate multiplier for grains
+        bed: 0.02,         // noise-bed level
+        sweep: 2400        // noise-bed bandpass center
+    };
+
     class AudioEngine {
         constructor() {
             this.ctx = null;
             this.enabled = false;
             this.level = 0.6;
             this.density = 0.5;
-            this.bpm = 128;
+            this.profile = { ...DEFAULT_PROFILE };
             this.analysis = null;
             this.nextNoteTime = 0;
             this.gridStep = 0;
-            this.lastByteBurst = 0;
+            this.lastGrainAdd = 0;
             this.lastClick = 0;
+            this.grainPool = [];      // AudioBuffers built from raw artifact bytes
+            this.gridProbMod = 1.0;   // modulated by crawl accept/reject ratio
+            this.hostCount = null;
         }
 
         async start() {
@@ -139,7 +161,7 @@ Module['onRuntimeInitialized'] = () => {
             for (let i = 0; i < 64; i++) imp[i] = (i % 2 === 0 ? 1 : -1) * Math.exp(-i / 12);
             this.impulseBuf = impulse;
 
-            // continuous filtered-noise bed, normally silent, swept by scenes
+            // continuous filtered-noise bed, level driven by crawl frontier size
             const noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
             const nd = noiseBuf.getChannelData(0);
             for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
@@ -148,7 +170,7 @@ Module['onRuntimeInitialized'] = () => {
             this.noiseSrc.loop = true;
             this.noiseFilter = ctx.createBiquadFilter();
             this.noiseFilter.type = 'bandpass';
-            this.noiseFilter.frequency.value = 1400;
+            this.noiseFilter.frequency.value = this.profile.sweep;
             this.noiseFilter.Q.value = 14;
             this.noiseGain = ctx.createGain();
             this.noiseGain.gain.value = 0.0;
@@ -174,24 +196,34 @@ Module['onRuntimeInitialized'] = () => {
         }
         setDensity(v) { this.density = v; }
 
-        click(t, peak = 0.4) {
+        // panned output node for one voice
+        out(pan) {
+            const p = this.ctx.createStereoPanner();
+            p.pan.value = Math.max(-1, Math.min(1, pan || 0));
+            p.connect(this.master);
+            return p;
+        }
+
+        click(t, peak = 0.4, pan = 0) {
             if (!this.enabled) return;
             const src = this.ctx.createBufferSource();
             src.buffer = this.impulseBuf;
             const g = this.ctx.createGain();
             g.gain.value = peak;
             src.connect(g);
-            g.connect(this.master);
+            g.connect(this.out(pan));
             src.start(t);
         }
 
         clickBurst(n, spacing = 0.024, peak = 0.4) {
             if (!this.enabled) return;
             const t0 = this.ctx.currentTime;
-            for (let i = 0; i < n; i++) this.click(t0 + i * spacing, peak * (1 - i / (n + 2)));
+            for (let i = 0; i < n; i++) {
+                this.click(t0 + i * spacing, peak * (1 - i / (n + 2)), Math.random() * 1.4 - 0.7);
+            }
         }
 
-        blip(t, freq, dur = 0.05, peak = 0.16) {
+        blip(t, freq, dur = 0.05, peak = 0.16, pan = 0) {
             if (!this.enabled) return;
             const osc = this.ctx.createOscillator();
             osc.type = 'sine';
@@ -201,7 +233,7 @@ Module['onRuntimeInitialized'] = () => {
             g.gain.linearRampToValueAtTime(peak, t + 0.002);
             g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
             osc.connect(g);
-            g.connect(this.master);
+            g.connect(this.out(pan));
             osc.start(t);
             osc.stop(t + dur + 0.02);
         }
@@ -221,101 +253,168 @@ Module['onRuntimeInitialized'] = () => {
             osc.stop(t + dur + 0.05);
         }
 
-        // Play the artifact's actual bytes as PCM: the image heard raw.
-        byteBurst(bytes, analysis) {
+        // pitch-dropping sine kick on scene cuts
+        kick(t) {
             if (!this.enabled) return;
-            const nowMs = performance.now();
-            if (nowMs - this.lastByteBurst < 400) return;
-            this.lastByteBurst = nowMs;
+            const osc = this.ctx.createOscillator();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(66, t);
+            osc.frequency.exponentialRampToValueAtTime(38, t + 0.12);
+            const g = this.ctx.createGain();
+            g.gain.setValueAtTime(0, t);
+            g.gain.linearRampToValueAtTime(0.7, t + 0.005);
+            g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+            osc.connect(g);
+            g.connect(this.master);
+            osc.start(t);
+            osc.stop(t + 0.4);
+        }
 
+        // Build an AudioBuffer from raw artifact bytes and keep it in the pool.
+        addGrainSource(bytes) {
+            if (!this.ctx) return;
+            const nowMs = performance.now();
+            if (nowMs - this.lastGrainAdd < 400) return;
+            this.lastGrainAdd = nowMs;
             const ctx = this.ctx;
             const n = Math.min(bytes.length, Math.floor(ctx.sampleRate * 0.35));
-            if (n < 256) return;
+            if (n < 512) return;
             const stride = Math.max(1, Math.floor(bytes.length / n));
             const buf = ctx.createBuffer(1, n, ctx.sampleRate);
             const d = buf.getChannelData(0);
-            for (let i = 0; i < n; i++) {
-                const v = (bytes[i * stride] - 128) / 128;
-                // short fade window on both ends to avoid clicks at the edges
-                const w = Math.min(1, i / 200, (n - i) / 200);
-                d[i] = v * w;
-            }
-            const src = ctx.createBufferSource();
-            src.buffer = buf;
-            const entropy = analysis && analysis.entropy ? analysis.entropy / 8 : 0.5;
-            src.playbackRate.value = 0.5 + entropy;
-            const filter = ctx.createBiquadFilter();
-            filter.type = 'bandpass';
-            filter.frequency.value = 400 + 4200 * Math.random();
-            filter.Q.value = 1.5;
-            const g = ctx.createGain();
-            g.gain.value = 0.10 + 0.10 * this.density;
-            src.connect(filter);
-            filter.connect(g);
-            g.connect(this.master);
-            src.start();
+            for (let i = 0; i < n; i++) d[i] = (bytes[i * stride] - 128) / 128;
+            this.grainPool.push(buf);
+            if (this.grainPool.length > 8) this.grainPool.shift();
         }
 
-        // 16th-note lookahead scheduler: the sine grid.
+        // One short windowed grain of collected data.
+        grain(t) {
+            if (!this.enabled || this.grainPool.length === 0) return;
+            const ctx = this.ctx;
+            const buf = this.grainPool[Math.floor(Math.random() * this.grainPool.length)];
+            const dur = 0.01 + Math.random() * 0.07;
+            const maxOffset = Math.max(0, buf.duration - dur - 0.001);
+            const src = ctx.createBufferSource();
+            src.buffer = buf;
+            const rates = [0.5, 0.75, 1, 1.5, 2];
+            src.playbackRate.value = rates[Math.floor(Math.random() * rates.length)] * this.profile.grainPitch;
+            const filter = ctx.createBiquadFilter();
+            filter.type = 'bandpass';
+            filter.frequency.value = 300 + Math.random() * 5700;
+            filter.Q.value = 1.2;
+            const g = ctx.createGain();
+            const peak = (0.05 + 0.13 * this.density);
+            g.gain.setValueAtTime(0, t);
+            g.gain.linearRampToValueAtTime(peak, t + dur * 0.5);   // hann-ish window
+            g.gain.linearRampToValueAtTime(0, t + dur);
+            src.connect(filter);
+            filter.connect(g);
+            g.connect(this.out(Math.random() * 1.6 - 0.8));
+            src.start(t, Math.random() * maxOffset, dur + 0.01);
+        }
+
+        // 16th-note lookahead scheduler.
         schedule() {
             if (!this.enabled) return;
-            const spb = 60 / this.bpm / 4;
-            const scale = [1244.5, 1661.2, 2217.5, 2960.0, 3951.1, 5274.0, 7040.0];
+            const prof = this.profile;
+            const spb = 60 / prof.bpm / 4;
             while (this.nextNoteTime < this.ctx.currentTime + 0.22) {
                 const t = this.nextNoteTime;
-                if (Math.random() < this.density * 0.85) {
+                const d = this.density;
+                if (Math.random() < prof.gridProb * this.gridProbMod * d * 1.2) {
                     const lum = this.analysis && this.analysis.luminance != null
                         ? clamp01(this.analysis.luminance) : Math.random();
-                    const idx = Math.min(scale.length - 1, Math.floor(lum * scale.length));
+                    const set = prof.pitchSet;
+                    const idx = Math.min(set.length - 1, Math.floor(lum * set.length));
                     const entropy = this.analysis && this.analysis.entropy ? this.analysis.entropy / 8 : 0.5;
-                    this.blip(t, scale[idx], 0.03 + 0.09 * entropy);
+                    this.blip(t, set[idx], 0.03 + 0.09 * entropy, 0.16, (Math.random() - 0.5) * 0.6);
                 }
-                if (Math.random() < this.density * 0.22) this.click(t, 0.3);
-                if (this.gridStep % 16 === 0 && Math.random() < 0.4) this.sub(t, 41 + Math.random() * 8, 0.4, 0.4);
+                if (Math.random() < prof.clickProb * d) this.click(t, 0.3, Math.random() * 1.2 - 0.6);
+                if (Math.random() < prof.grainProb * d) this.grain(t);
+                if (prof.subPattern && this.gridStep % 8 === 0) this.sub(t, 45, 0.22, 0.45);
+                if (this.gridStep % 16 === 0 && Math.random() < 0.35) this.sub(t, 41 + Math.random() * 8, 0.4, 0.4);
                 this.gridStep++;
                 this.nextNoteTime += spb;
             }
         }
 
         onArtifact(header, payload) {
-            if (!this.enabled) return;
             const analysis = header.metadata && header.metadata.analysis;
             if (analysis) this.analysis = analysis;
+            if (!this.enabled) return;
             const nowMs = performance.now();
             if (nowMs - this.lastClick > 40) {
                 this.lastClick = nowMs;
-                this.click(this.ctx.currentTime, 0.35);
+                // pan deterministically by sequence so each artifact has a place
+                const h = ((header.sequence * 2654435761) >>> 0) / 4294967296;
+                this.click(this.ctx.currentTime, 0.35, h * 1.6 - 0.8);
             }
-            if (Math.random() < 0.35) this.byteBurst(payload, analysis);
+            this.addGrainSource(payload);
         }
 
         onScene(scene) {
+            this.profile = { ...DEFAULT_PROFILE, ...(scene.audio || {}) };
             if (!this.enabled) return;
-            const a = scene.audio || {};
-            this.bpm = a.bpm || 128;
             const t = this.ctx.currentTime;
-            this.sub(t, 43, 0.8, 0.6);
+            this.kick(t);
             this.clickBurst(9, 0.02, 0.5);
-            const sweepTo = a.sweep || (600 + Math.random() * 3000);
-            this.noiseFilter.frequency.setTargetAtTime(sweepTo, t, 0.4);
-            this.noiseGain.gain.setTargetAtTime((a.bed != null ? a.bed : 0.02) * this.density, t, 0.5);
+            this.noiseFilter.frequency.setTargetAtTime(this.profile.sweep, t, 0.4);
+            this.noiseGain.gain.setTargetAtTime(this.profile.bed * this.density, t, 0.5);
         }
 
         onPulse(strength) {
             if (!this.enabled) return;
             this.clickBurst(3 + Math.floor(strength * 6), 0.018, 0.45);
         }
+
+        // Crawl telemetry -> sound: new hosts ping, frontier feeds the bed,
+        // rejection ratio thins the grid.
+        onTelemetry(payload) {
+            if (payload.distinct_hosts != null) {
+                if (this.hostCount != null && payload.distinct_hosts > this.hostCount && this.enabled) {
+                    const t = this.ctx.currentTime;
+                    [5274, 6644, 7902].forEach((f, i) => this.blip(t + i * 0.07, f, 0.06, 0.14, i * 0.5 - 0.5));
+                }
+                this.hostCount = payload.distinct_hosts;
+            }
+            const accepted = payload.images_accepted || 0;
+            const rejected = payload.images_rejected || 0;
+            if (accepted + rejected > 0) {
+                this.gridProbMod = 0.7 + 0.6 * (accepted / (accepted + rejected));
+            }
+            if (this.enabled && payload.frontier_size != null) {
+                const bed = this.profile.bed * this.density * Math.min(2, 0.5 + payload.frontier_size / 20000);
+                this.noiseGain.gain.setTargetAtTime(bed, this.ctx.currentTime, 1.0);
+            }
+        }
+
+        // Hard cut: silence for durMs, then slam back.
+        dropout(durMs) {
+            if (!this.enabled) return;
+            const g = this.master.gain;
+            g.cancelScheduledValues(this.ctx.currentTime);
+            g.setTargetAtTime(0.0001, this.ctx.currentTime, 0.008);
+            setTimeout(() => {
+                if (this.ctx) g.setTargetAtTime(this.level, this.ctx.currentTime, 0.015);
+            }, durMs);
+        }
+
+        // ms until the next 16th-note, for beat-locking visual glitches
+        nextGridDelayMs() {
+            if (!this.enabled || !this.ctx) return 0;
+            return Math.max(0, (this.nextNoteTime - this.ctx.currentTime) * 1000);
+        }
     }
 
     const audio = new AudioEngine();
 
     // ------------------------------------------------------------------
-    // Conductor: scenes, drift, micro-events
+    // Conductor: scenes, drift, reveals, dropouts, micro-events
     // ------------------------------------------------------------------
     const SCENES = [
         {
             name: 'HALFTONE FIELD',
-            audio: { bpm: 126, sweep: 2400, bed: 0.015 },
+            audio: { bpm: 126, sweep: 2400, bed: 0.015, gridProb: 0.7, clickProb: 0.2, grainProb: 0.45 },
             hold: [24, 40],
             params: {
                 styleA: 2, styleB: 8, styleMix: 0.15, threshold: 0.5, contrast: 1.5, jitter: 0.3,
@@ -323,38 +422,38 @@ Module['onRuntimeInitialized'] = () => {
                 moshAmount: 0.15, moshBlock: 0.03, moshDrop: 0.1, moshDecay: 0.97,
                 scanline: 0.3, noise: 0.06, strobe: 0, invert: 0,
                 fade: 0.55, switchInterval: 0.3, tileFactor: 3, tileFraction: 0.5,
-                scrollX: 0.05, scrollY: 0
+                scrollX: 0.05, scrollY: 0, flashBoost: 0.5, gutter: 0
             }
         },
         {
             name: 'BINARY WALL',
-            audio: { bpm: 152, sweep: 5200, bed: 0.02 },
+            audio: { bpm: 152, sweep: 5200, bed: 0.02, gridProb: 0.55, clickProb: 0.65, grainProb: 0.3, pitchSet: [2960, 3951, 5274, 7040, 8869] },
             hold: [18, 32],
             params: {
-                styleA: 1, styleB: 7, styleMix: 0.3, threshold: 0.48, contrast: 1.8, jitter: 0.55,
+                styleA: 1, styleB: 10, styleMix: 0.35, threshold: 0.48, contrast: 1.8, jitter: 0.55,
                 dither: 2, blockScale: 12, sliceAmp: 0.08, grid: 0.35,
                 moshAmount: 0.05, moshBlock: 0.02, moshDrop: 0.05, moshDecay: 0.985,
                 scanline: 0.25, noise: 0.12, strobe: 0, invert: 0,
                 fade: 0.8, switchInterval: 0.12, tileFactor: 4, tileFraction: 0.6,
-                scrollX: 0.0, scrollY: 0.03
+                scrollX: 0.0, scrollY: 0.03, flashBoost: 0.7, gutter: 0
             }
         },
         {
             name: 'WIREFRAME',
-            audio: { bpm: 96, sweep: 900, bed: 0.03 },
+            audio: { bpm: 96, sweep: 900, bed: 0.03, gridProb: 0.4, clickProb: 0.12, grainProb: 0.35, grainPitch: 0.7, pitchSet: [622.3, 932.3, 1244.5, 1864.7] },
             hold: [20, 35],
             params: {
-                styleA: 3, styleB: 0, styleMix: 0.12, threshold: 0.5, contrast: 2.2, jitter: 0.2,
+                styleA: 3, styleB: 11, styleMix: 0.3, threshold: 0.5, contrast: 2.2, jitter: 0.2,
                 dither: 3, blockScale: 16, sliceAmp: 0.05, grid: 0.7,
                 moshAmount: 0.1, moshBlock: 0.05, moshDrop: 0.12, moshDecay: 0.96,
                 scanline: 0.5, noise: 0.04, strobe: 0, invert: 0,
                 fade: 0.4, switchInterval: 0.45, tileFactor: 2, tileFraction: 0.4,
-                scrollX: 0.0, scrollY: -0.02
+                scrollX: 0.0, scrollY: -0.02, flashBoost: 0.4, gutter: 0.1
             }
         },
         {
             name: 'MELT',
-            audio: { bpm: 74, sweep: 500, bed: 0.045 },
+            audio: { bpm: 74, sweep: 500, bed: 0.045, gridProb: 0.25, clickProb: 0.08, grainProb: 0.8, grainPitch: 0.5, pitchSet: [311.1, 415.3, 622.3, 830.6] },
             hold: [22, 38],
             params: {
                 styleA: 0, styleB: 5, styleMix: 0.35, threshold: 0.5, contrast: 1.3, jitter: 0.3,
@@ -362,12 +461,12 @@ Module['onRuntimeInitialized'] = () => {
                 moshAmount: 0.6, moshBlock: 0.05, moshDrop: 0.45, moshDecay: 0.93,
                 scanline: 0.2, noise: 0.05, strobe: 0, invert: 0,
                 fade: 0.25, switchInterval: 0.5, tileFactor: 2, tileFraction: 0.35,
-                scrollX: 0.02, scrollY: 0.01
+                scrollX: 0.02, scrollY: 0.01, flashBoost: 0.2, gutter: 0
             }
         },
         {
             name: 'READOUT',
-            audio: { bpm: 132, sweep: 3600, bed: 0.02 },
+            audio: { bpm: 132, sweep: 3600, bed: 0.02, gridProb: 0.95, clickProb: 0.3, grainProb: 0.25 },
             hold: [18, 30],
             params: {
                 styleA: 6, styleB: 7, styleMix: 0.4, threshold: 0.4, contrast: 1.6, jitter: 0.25,
@@ -375,12 +474,12 @@ Module['onRuntimeInitialized'] = () => {
                 moshAmount: 0.08, moshBlock: 0.025, moshDrop: 0.08, moshDecay: 0.975,
                 scanline: 0.45, noise: 0.05, strobe: 0, invert: 0,
                 fade: 0.6, switchInterval: 0.4, tileFactor: 2, tileFraction: 0.5,
-                scrollX: -0.04, scrollY: 0
+                scrollX: -0.04, scrollY: 0, flashBoost: 0.5, gutter: 0.15
             }
         },
         {
             name: 'HEX RAIN',
-            audio: { bpm: 118, sweep: 1800, bed: 0.025 },
+            audio: { bpm: 118, sweep: 1800, bed: 0.025, gridProb: 0.6, clickProb: 0.25, grainProb: 0.5 },
             hold: [20, 34],
             params: {
                 styleA: 8, styleB: 8, styleMix: 0.5, threshold: 0.5, contrast: 1.4, jitter: 0.3,
@@ -388,12 +487,12 @@ Module['onRuntimeInitialized'] = () => {
                 moshAmount: 0.12, moshBlock: 0.03, moshDrop: 0.15, moshDecay: 0.96,
                 scanline: 0.3, noise: 0.08, strobe: 0, invert: 0,
                 fade: 0.6, switchInterval: 0.25, tileFactor: 2, tileFraction: 0.45,
-                scrollX: 0, scrollY: 0.05
+                scrollX: 0, scrollY: 0.05, flashBoost: 0.5, gutter: 0
             }
         },
         {
             name: 'AVALANCHE',
-            audio: { bpm: 168, sweep: 6400, bed: 0.035 },
+            audio: { bpm: 168, sweep: 6400, bed: 0.035, gridProb: 0.8, clickProb: 0.9, grainProb: 0.7, subPattern: true },
             hold: [12, 22],
             params: {
                 styleA: 2, styleB: 4, styleMix: 0.5, threshold: 0.5, contrast: 1.7, jitter: 0.5,
@@ -401,12 +500,12 @@ Module['onRuntimeInitialized'] = () => {
                 moshAmount: 0.3, moshBlock: 0.02, moshDrop: 0.2, moshDecay: 0.95,
                 scanline: 0.35, noise: 0.16, strobe: 0.2, invert: 0,
                 fade: 0.95, switchInterval: 0.03, tileFactor: 5, tileFraction: 0.8,
-                scrollX: 0.12, scrollY: -0.06
+                scrollX: 0.12, scrollY: -0.06, flashBoost: 0.9, gutter: 0
             }
         },
         {
             name: 'STATIC',
-            audio: { bpm: 60, sweep: 300, bed: 0.05 },
+            audio: { bpm: 60, sweep: 300, bed: 0.05, gridProb: 0.12, clickProb: 0.05, grainProb: 0.3, grainPitch: 0.4, pitchSet: [4978, 7040, 9956] },
             hold: [14, 24],
             params: {
                 styleA: 9, styleB: 1, styleMix: 0.3, threshold: 0.55, contrast: 1.2, jitter: 0.4,
@@ -414,7 +513,20 @@ Module['onRuntimeInitialized'] = () => {
                 moshAmount: 0.8, moshBlock: 0.09, moshDrop: 0.7, moshDecay: 0.9,
                 scanline: 0.75, noise: 0.1, strobe: 0, invert: 0,
                 fade: 0.1, switchInterval: 0.8, tileFactor: 1, tileFraction: 0.3,
-                scrollX: 0.005, scrollY: 0
+                scrollX: 0.005, scrollY: 0, flashBoost: 0.1, gutter: 0
+            }
+        },
+        {
+            name: 'ARCHIVE',
+            audio: { bpm: 100, sweep: 1500, bed: 0.01, gridProb: 0.3, clickProb: 0.15, grainProb: 0.2 },
+            hold: [20, 35],
+            params: {
+                styleA: 0, styleB: 0, styleMix: 0, threshold: 0.5, contrast: 1.15, jitter: 0.1,
+                dither: 3, blockScale: 16, sliceAmp: 0, grid: 0.5,
+                moshAmount: 0, moshBlock: 0.02, moshDrop: 0, moshDecay: 0.985,
+                scanline: 0.08, noise: 0.02, strobe: 0, invert: 0,
+                fade: 0.75, switchInterval: 0.55, tileFactor: 3, tileFraction: 0.35,
+                scrollX: 0.01, scrollY: 0, flashBoost: 0.45, gutter: 0.55
             }
         }
     ];
@@ -424,9 +536,11 @@ Module['onRuntimeInitialized'] = () => {
         sceneIndex: 0,
         sceneEndsAt: 0,
         strobeRestore: null,
+        reveal: false,
         t: 0,
 
         cut(index, manual = false) {
+            if (debug.active) return;
             this.sceneIndex = ((index % SCENES.length) + SCENES.length) % SCENES.length;
             const scene = SCENES[this.sceneIndex];
             applyParams(scene.params);
@@ -443,7 +557,52 @@ Module['onRuntimeInitialized'] = () => {
 
         next() { this.cut(this.sceneIndex + 1 + Math.floor(Math.random() * (SCENES.length - 1))); },
 
+        // ramp bypass up and back: the raw images surface through the abstraction
+        startReveal() {
+            if (this.reveal || debug.active) return;
+            this.reveal = true;
+            const up = 600, hold = 800, down = 1100;
+            const t0 = performance.now();
+            const timer = setInterval(() => {
+                const el = performance.now() - t0;
+                let v = 0;
+                if (el < up) v = (el / up) * 0.85;
+                else if (el < up + hold) v = 0.85;
+                else if (el < up + hold + down) v = 0.85 * (1 - (el - up - hold) / down);
+                else {
+                    clearInterval(timer);
+                    this.reveal = false;
+                    v = 0;
+                }
+                if (!debug.active) engine.setBypass(v);
+            }, 50);
+        },
+
+        // hard cut: audio dropout + visual blackout, then slam back
+        dropout() {
+            if (debug.active) return;
+            const dur = 700 + Math.random() * 800;
+            audio.dropout(dur);
+            const blackout = document.getElementById('blackout');
+            if (blackout) blackout.classList.add('on');
+            setTimeout(() => {
+                if (blackout) blackout.classList.remove('on');
+                engine.pulse(1.0);
+                audio.onPulse(1.0);
+            }, dur);
+        },
+
+        // fire a glitch pulse, locked to the audio grid when sound is on
+        firePulse(strength) {
+            const delay = audio.nextGridDelayMs();
+            setTimeout(() => {
+                engine.pulse(strength);
+                audio.onPulse(strength);
+            }, delay);
+        },
+
         tick(dtMs) {
+            if (debug.active) return;
             this.t += dtMs / 1000;
 
             // slow breathing of threshold/mosh so nothing is ever static
@@ -454,13 +613,11 @@ Module['onRuntimeInitialized'] = () => {
 
             if (!this.auto) return;
 
-            // micro-events: glitch bursts that hit visuals and audio together
             const p = dtMs / 1000;
-            if (Math.random() < p * 0.22) {
-                const strength = 0.4 + Math.random() * 0.6;
-                engine.pulse(strength);
-                audio.onPulse(strength);
-            }
+            if (Math.random() < p * 0.22) this.firePulse(0.4 + Math.random() * 0.6);
+            if (Math.random() < p * 0.03) this.startReveal();
+            if (audio.enabled && Math.random() < p * 0.015) this.dropout();
+
             // rare strobe burst, restored after ~700ms
             if (this.strobeRestore === null && Math.random() < p * 0.02) {
                 const prev = state.strobe;
@@ -478,9 +635,51 @@ Module['onRuntimeInitialized'] = () => {
     };
 
     // ------------------------------------------------------------------
+    // Debug / neutral mode: the crawl, unprocessed
+    // ------------------------------------------------------------------
+    const debug = { active: false, saved: null, wasAuto: true };
+
+    function syncAutoUi() {
+        const box = document.getElementById('autoMode');
+        if (box) box.checked = conductor.auto;
+        setText('autoModeVal', conductor.auto ? 'ON' : 'OFF');
+    }
+
+    function setDebugMode(on) {
+        if (on === debug.active) return;
+        const btn = document.getElementById('debugToggle');
+        if (on) {
+            debug.saved = { ...state };
+            debug.wasAuto = conductor.auto;
+            conductor.auto = false;
+            syncAutoUi();
+            debug.active = true;
+            applyParams({
+                moshAmount: 0, moshDrop: 0, sliceAmp: 0,
+                scanline: 0, noise: 0, strobe: 0, invert: 0,
+                grid: 0.35, gutter: 0.6, flashBoost: 0.25, colorBleed: 1,
+                fade: 0.9, switchInterval: 0.5, scrollX: 0, scrollY: 0
+            });
+            engine.setBypass(1.0);
+            if (btn) btn.classList.add('active');
+            setText('sceneLabel', 'DEBUG');
+            flashScene('DEBUG');
+        } else {
+            debug.active = false;
+            if (debug.saved) applyParams(debug.saved);
+            engine.setBypass(0.0);
+            conductor.auto = debug.wasAuto;
+            syncAutoUi();
+            if (btn) btn.classList.remove('active');
+            setText('sceneLabel', SCENES[conductor.sceneIndex].name);
+            if (conductor.auto) conductor.sceneEndsAt = performance.now() + 8000;
+        }
+    }
+
+    // ------------------------------------------------------------------
     // UI plumbing
     // ------------------------------------------------------------------
-    let programmatic = false; // true while conductor writes sliders
+    let programmatic = false; // true while conductor/debug writes sliders
 
     function setText(id, text) {
         const el = document.getElementById(id);
@@ -500,13 +699,13 @@ Module['onRuntimeInitialized'] = () => {
         el.classList.add('on');
     }
 
-    // group -> push function; manual edits to "artistic" groups disable auto
     const GROUPS = {
         styles: { push: pushStyles, artistic: true },
         tone: { push: pushTone, artistic: true },
         structure: { push: pushStructure, artistic: true },
         mosh: { push: pushMosh, artistic: true },
         temporal: { push: pushTemporal, artistic: true },
+        accents: { push: pushAccents, artistic: true },
         flow: { push: pushFlow, artistic: true }
     };
 
@@ -520,6 +719,8 @@ Module['onRuntimeInitialized'] = () => {
         blockScale: { group: 'structure', digits: 0 },
         sliceAmp: { group: 'structure', digits: 2 },
         grid: { group: 'structure', digits: 2 },
+        flashBoost: { group: 'accents', digits: 2 },
+        gutter: { group: 'accents', digits: 2 },
         moshAmount: { group: 'mosh', digits: 2 },
         moshBlock: { group: 'mosh', digits: 3 },
         moshDrop: { group: 'mosh', digits: 2 },
@@ -540,9 +741,7 @@ Module['onRuntimeInitialized'] = () => {
     function disableAuto() {
         if (!conductor.auto) return;
         conductor.auto = false;
-        const box = document.getElementById('autoMode');
-        if (box) box.checked = false;
-        setText('autoModeVal', 'OFF');
+        syncAutoUi();
     }
 
     for (const [id, spec] of Object.entries(CONTROLS)) {
@@ -585,15 +784,16 @@ Module['onRuntimeInitialized'] = () => {
         });
         select.addEventListener('change', () => conductor.cut(parseInt(select.value, 10), true));
         document.getElementById('nextScene').addEventListener('click', () => conductor.next());
-        document.getElementById('pulseBtn').addEventListener('click', () => {
-            engine.pulse(1.0);
-            audio.onPulse(1.0);
-        });
+        document.getElementById('pulseBtn').addEventListener('click', () => conductor.firePulse(1.0));
+        document.getElementById('debugToggle').addEventListener('click', () => setDebugMode(!debug.active));
         const autoBox = document.getElementById('autoMode');
         autoBox.addEventListener('change', () => {
             conductor.auto = autoBox.checked;
             setText('autoModeVal', conductor.auto ? 'ON' : 'OFF');
-            if (conductor.auto) conductor.sceneEndsAt = performance.now() + 5000;
+            if (conductor.auto) {
+                if (debug.active) setDebugMode(false);
+                conductor.sceneEndsAt = performance.now() + 5000;
+            }
         });
     }
 
@@ -602,13 +802,13 @@ Module['onRuntimeInitialized'] = () => {
         programmatic = true;
         for (const [key, value] of Object.entries(params)) {
             state[key] = value;
-            const slider = document.getElementById(key);
-            if (slider && slider.tagName === 'INPUT') {
-                slider.value = value;
+            const widget = document.getElementById(key);
+            if (widget && widget.tagName === 'INPUT') {
+                widget.value = value;
                 const spec = CONTROLS[key];
                 if (spec) setText(key + 'Val', fmt(value, spec.digits));
-            } else if (slider && slider.tagName === 'SELECT') {
-                slider.value = String(value);
+            } else if (widget && widget.tagName === 'SELECT') {
+                widget.value = String(value);
             }
         }
         pushAll();
@@ -647,12 +847,13 @@ Module['onRuntimeInitialized'] = () => {
             document.getElementById('panel').classList.toggle('open');
         } else if (key === 'a') {
             window.__toggleAudio();
+        } else if (key === 'd') {
+            setDebugMode(!debug.active);
         } else if (key === ' ') {
             conductor.next();
             event.preventDefault();
         } else if (key === 'p') {
-            engine.pulse(1.0);
-            audio.onPulse(1.0);
+            conductor.firePulse(1.0);
         } else if (key === 'i') {
             const prev = state.invert;
             state.invert = 1;
@@ -734,7 +935,8 @@ Module['onRuntimeInitialized'] = () => {
             provenance.textContent = `#${header.sequence} ${header.producer} | ${header.source_url || 'generated'} | ${rights.license || rights.status || 'unknown rights'}`;
         }
 
-        // each arriving artifact injects a small amount of event energy + sound
+        // each arriving artifact injects event energy, sound, and its sequence
+        engine.setSequence(header.sequence >>> 0);
         engine.pulse(0.12);
         audio.onArtifact(header, payload);
 
@@ -837,6 +1039,7 @@ Module['onRuntimeInitialized'] = () => {
         const contentPolicy = document.getElementById('crawlerContentPolicy');
         if (contentPolicy) contentPolicy.value = payload.content_policy ?? broker.content_policy ?? 'broad';
         renderCrawlerLog(payload.recent_events || [], payload.recent_errors || []);
+        audio.onTelemetry(payload);
     }
 
     async function refreshCrawlerState() {
@@ -951,7 +1154,7 @@ Module['onRuntimeInitialized'] = () => {
         setText('bufferUsageLabel', `${engine.getBufferUsage()}/${engine.getRingBufferSize()}`);
     }, 2000);
 
-    console.log('DATAVALANCHE: H panel, A sound, SPACE cut, P pulse, I invert, F fullscreen, 0-9 scenes');
+    console.log('DATAVALANCHE: H panel, A sound, D debug, SPACE cut, P pulse, I invert, F fullscreen, 0-8 scenes');
 };
 
 Module['onAbort'] = (what) => {

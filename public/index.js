@@ -6735,19 +6735,19 @@ function checkIncomingModuleAPI() {
 }
 
 var ASM_CONSTS = {
-  122108: $0 => {
+  125292: $0 => {
     if (Module.onRendererEvent) Module.onRendererEvent(2, $0);
   },
-  122171: $0 => {
+  125355: $0 => {
     if (Module.onRendererEvent) Module.onRendererEvent(1, $0);
   },
-  122234: $0 => {
+  125418: $0 => {
     if (Module.onRendererEvent) Module.onRendererEvent(3, $0);
   },
-  122297: $0 => {
+  125481: $0 => {
     if (Module.onRendererEvent) Module.onRendererEvent(4, $0);
   },
-  122360: ($0, $1) => {
+  125544: ($0, $1) => {
     if (Module.onWebGPUError) {
       Module.onWebGPUError($0, UTF8ToString($1));
     }
@@ -6792,6 +6792,12 @@ var _setMosh = Module["_setMosh"] = makeInvalidEarlyAccess("_setMosh");
 var _setTemporal = Module["_setTemporal"] = makeInvalidEarlyAccess("_setTemporal");
 
 var _pulse = Module["_pulse"] = makeInvalidEarlyAccess("_pulse");
+
+var _setBypass = Module["_setBypass"] = makeInvalidEarlyAccess("_setBypass");
+
+var _setAccents = Module["_setAccents"] = makeInvalidEarlyAccess("_setAccents");
+
+var _setSequence = Module["_setSequence"] = makeInvalidEarlyAccess("_setSequence");
 
 var _main = Module["_main"] = makeInvalidEarlyAccess("_main");
 
@@ -6943,6 +6949,9 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports["setMosh"] != "undefined", "missing Wasm export: setMosh");
   assert(typeof wasmExports["setTemporal"] != "undefined", "missing Wasm export: setTemporal");
   assert(typeof wasmExports["pulse"] != "undefined", "missing Wasm export: pulse");
+  assert(typeof wasmExports["setBypass"] != "undefined", "missing Wasm export: setBypass");
+  assert(typeof wasmExports["setAccents"] != "undefined", "missing Wasm export: setAccents");
+  assert(typeof wasmExports["setSequence"] != "undefined", "missing Wasm export: setSequence");
   assert(typeof wasmExports["main"] != "undefined", "missing Wasm export: main");
   assert(typeof wasmExports["emwgpuCreateBindGroup"] != "undefined", "missing Wasm export: emwgpuCreateBindGroup");
   assert(typeof wasmExports["emwgpuCreateBindGroupLayout"] != "undefined", "missing Wasm export: emwgpuCreateBindGroupLayout");
@@ -7026,6 +7035,9 @@ function assignWasmExports(wasmExports) {
   _setMosh = Module["_setMosh"] = createExportWrapper("setMosh", 4);
   _setTemporal = Module["_setTemporal"] = createExportWrapper("setTemporal", 4);
   _pulse = Module["_pulse"] = createExportWrapper("pulse", 1);
+  _setBypass = Module["_setBypass"] = createExportWrapper("setBypass", 1);
+  _setAccents = Module["_setAccents"] = createExportWrapper("setAccents", 2);
+  _setSequence = Module["_setSequence"] = createExportWrapper("setSequence", 1);
   _main = Module["_main"] = createExportWrapper("main", 2);
   _emwgpuCreateBindGroup = createExportWrapper("emwgpuCreateBindGroup", 1);
   _emwgpuCreateBindGroupLayout = createExportWrapper("emwgpuCreateBindGroupLayout", 1);

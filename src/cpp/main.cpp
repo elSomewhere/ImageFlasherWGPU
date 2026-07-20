@@ -84,6 +84,7 @@ struct VSOutput {
     @location(0) uv : vec2<f32>,
     @location(1) @interpolate(flat) layerIndex : i32,
     @location(2) @interpolate(flat) instanceId : u32,
+    @location(3) @interpolate(flat) tileAge : f32,
 };
 
 @vertex
@@ -107,8 +108,12 @@ fn vsTile(@builtin(vertex_index) vid : u32, @builtin(instance_index) instance : 
     var out : VSOutput;
     out.Position = vec4<f32>(center + positions[vid] * tileScale, 0.0, 1.0);
     out.uv = uvs[vid];
-    out.layerIndex = i32(tiles.layers[instance]);
+    // Entries pack the ring-slot in the low 8 bits and the tile's age
+    // (frames since its last switch) in the upper bits.
+    let packed = tiles.layers[instance];
+    out.layerIndex = i32(packed & 0xFFu);
     out.instanceId = instance;
+    out.tileAge = f32(packed >> 8u);
     return out;
 }
 )";
@@ -217,7 +222,7 @@ static float g_speedY  = 0.0f;
 static float g_globalTime  = 0.0f;
 static float g_eventPulse  = 0.0f;  // impulse energy, decays every frame
 static float g_strobe      = 0.0f;
-static float g_sceneMix    = 0.0f;
+static float g_bypass      = 0.0f;  // 1 = neutral/debug: raw images, no treatment
 
 static float g_styleA       = 2.0f; // BAYER
 static float g_styleB       = 8.0f; // HEX
@@ -241,6 +246,10 @@ static float g_noiseAmount = 0.08f;
 
 static float g_colorBleed = 0.0f;
 static float g_contrast   = 1.4f;
+
+static float g_flashBoost  = 0.6f;
+static float g_tileGutter  = 0.0f;
+static float g_sequenceLow = 0.0f;
 
 static constexpr float kEventPulseHalfLifeMs = 220.0f;
 
@@ -438,6 +447,8 @@ private:
 
     // store the ring-buffer index for each tile
     std::vector<uint32_t> tileIndices_;
+    // frames since each tile last switched (drives the arrival flash)
+    std::vector<uint32_t> tileAges_;
     std::vector<uint32_t> tileStateData_;
     std::vector<uint32_t> slotSequences_;
     std::unordered_set<uint32_t> presentedSequences_;
@@ -506,7 +517,7 @@ ImageFlasher::ImageFlasher(wgpu::Device dev, uint32_t ringSize, float switchInte
     bgle[3].binding = 3;
     bgle[3].visibility = wgpu::ShaderStage::Fragment;
     bgle[3].buffer.type = wgpu::BufferBindingType::Uniform;
-    bgle[3].buffer.minBindingSize = 96; // RenderParams struct size
+    bgle[3].buffer.minBindingSize = 112; // RenderParams struct size
 
     wgpu::BindGroupLayoutDescriptor bglDesc = {};
     bglDesc.entryCount = 4;  // Restore 4 bindings for Ikeda shader
@@ -547,7 +558,7 @@ ImageFlasher::ImageFlasher(wgpu::Device dev, uint32_t ringSize, float switchInte
     e[2].sampler = sampler_;
     e[3].binding = 3;
     e[3].buffer = ikedaUniformBuffer;
-    e[3].size = 96;
+    e[3].size = 112;
     wgpu::BindGroupDescriptor bgd = {};
     bgd.layout = bindGroupLayout_;
     bgd.entryCount = 4;
@@ -630,12 +641,14 @@ void ImageFlasher::renderTiles(wgpu::RenderPassEncoder& pass, int tileFactor){
     if ((int)tileIndices_.size() != totalTiles){
         tileIndices_.resize(totalTiles, (writeIndex_ + ringBufferSize_ - 1) % ringBufferSize_);
         tileTimers_.resize(totalTiles, 0.0f);
+        tileAges_.resize(totalTiles, 1000u);
         std::cout << "[INFO] tileIndices_ re-init to size " << totalTiles << "\n";
     }
 
-    // ========== 1) Accumulate dt into tileTimers_ ==========
+    // ========== 1) Accumulate dt into tileTimers_, age every tile ==========
     for (int i=0; i<totalTiles; i++){
         tileTimers_[i] += (dt_ * 0.001f);
+        if (tileAges_[i] < 10000u) tileAges_[i]++;
     }
 
     // ========== 2) Build a list of "candidate" tiles whose timers exceed imageSwitchInterval_ ==========
@@ -661,6 +674,7 @@ void ImageFlasher::renderTiles(wgpu::RenderPassEncoder& pass, int tileFactor){
             int tileId = candidates[i];
             tileIndices_[tileId] = randomResidentSlot();
             tileTimers_[tileId]  = 0.0f; // reset timer
+            tileAges_[tileId]    = 0u;   // fresh switch => arrival flash
             uint32_t sequence = slotSequences_[tileIndices_[tileId]];
             if (sequence != 0 && presentedSequences_.insert(sequence).second) {
                 EM_ASM({ if (Module.onRendererEvent) Module.onRendererEvent(3, $0); }, sequence);
@@ -669,7 +683,10 @@ void ImageFlasher::renderTiles(wgpu::RenderPassEncoder& pass, int tileFactor){
     }
     tileStateData_[0] = static_cast<uint32_t>(gridSize);
     tileStateData_[1] = imagesInBuffer_;
-    for (int i = 0; i < totalTiles; ++i) tileStateData_[4 + i] = tileIndices_[i];
+    // ring-slot in the low 8 bits (ring size 256), tile age above
+    for (int i = 0; i < totalTiles; ++i) {
+        tileStateData_[4 + i] = (tileIndices_[i] & 0xFFu) | (tileAges_[i] << 8);
+    }
     queue_.WriteBuffer(
         tileStateBuffer_, 0, tileStateData_.data(),
         static_cast<size_t>(4 + totalTiles) * sizeof(uint32_t)
@@ -740,7 +757,7 @@ extern "C" void initializeSurfaceAndPipeline() {
     // Create ikedaUniformBuffer before ImageFlasher constructor
     {
         wgpu::BufferDescriptor bd = {};
-        bd.size  = 24 * sizeof(float); // RenderParams: 24 floats = 96 bytes
+        bd.size  = 28 * sizeof(float); // RenderParams: 28 floats = 112 bytes
         bd.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
         ikedaUniformBuffer = device.CreateBuffer(&bd);
     }
@@ -874,7 +891,7 @@ extern "C" void initializeSurfaceAndPipeline() {
                 e[3].sampler     = commonSampler;
                 e[4].binding     = 4; // ikeda uniform
                 e[4].buffer      = ikedaUniformBuffer;
-                e[4].size        = 96; // RenderParams struct size
+                e[4].size        = 112; // RenderParams struct size
 
                 wgpu::BindGroupDescriptor bd = {};
                 bd.layout     = bgl;
@@ -914,7 +931,7 @@ extern "C" void initializeSurfaceAndPipeline() {
                 e[2].size         = 2*sizeof(float);
                 e[3].binding      = 3;
                 e[3].buffer       = ikedaUniformBuffer;
-                e[3].size         = 96; // RenderParams struct size
+                e[3].size         = 112; // RenderParams struct size
 
                 wgpu::BindGroupDescriptor bd = {};
                 bd.layout     = bgl;
@@ -978,19 +995,20 @@ void updateIkedaUniforms() {
     if (!ikedaUniformBuffer) return;
 
     struct RenderParams {
-        float time, eventPulse, strobe, sceneMix;
+        float time, eventPulse, strobe, bypass;
         float styleA, styleB, styleMixProb, threshold;
         float ditherScale, blockScale, sliceAmp, jitterAmp;
         float moshAmount, moshBlock, moshDrop, feedbackDecay;
         float invert, gridOverlay, scanline, noiseAmount;
         float canvasWidth, canvasHeight, colorBleed, contrast;
+        float flashBoost, tileGutter, sequenceLow, reserved0;
     } p;
-    static_assert(sizeof(RenderParams) == 96, "RenderParams must stay 96 bytes");
+    static_assert(sizeof(RenderParams) == 112, "RenderParams must stay 112 bytes");
 
     p.time = g_globalTime;
     p.eventPulse = g_eventPulse;
     p.strobe = g_strobe;
-    p.sceneMix = g_sceneMix;
+    p.bypass = g_bypass;
     p.styleA = g_styleA;
     p.styleB = g_styleB;
     p.styleMixProb = g_styleMixProb;
@@ -1011,6 +1029,10 @@ void updateIkedaUniforms() {
     p.canvasHeight = (float)g_canvasHeight;
     p.colorBleed = g_colorBleed;
     p.contrast = g_contrast;
+    p.flashBoost = g_flashBoost;
+    p.tileGutter = g_tileGutter;
+    p.sequenceLow = g_sequenceLow;
+    p.reserved0 = 0.0f;
 
     queue.WriteBuffer(ikedaUniformBuffer, 0, &p, sizeof(p));
 }
@@ -1085,11 +1107,11 @@ void setScrollingOffset(float ox, float oy) {
 // ========== Render parameter API (called from app.js) ==========
 
 // Tile materials: 0 RAW, 1 THRESH, 2 BAYER, 3 EDGE, 4 SORT, 5 SLICE,
-//                 6 WAVE, 7 BARCODE, 8 HEX, 9 BLOCKS
+//                 6 WAVE, 7 BARCODE, 8 HEX, 9 BLOCKS, 10 BITPLANE, 11 CONTOUR
 EMSCRIPTEN_KEEPALIVE
 void setStyles(int styleA, int styleB, float mixProb) {
-    g_styleA = (float)std::clamp(styleA, 0, 9);
-    g_styleB = (float)std::clamp(styleB, 0, 9);
+    g_styleA = (float)std::clamp(styleA, 0, 11);
+    g_styleB = (float)std::clamp(styleB, 0, 11);
     g_styleMixProb = std::clamp(mixProb, 0.0f, 1.0f);
 }
 
@@ -1129,6 +1151,25 @@ void setTemporal(float scanline, float noise, float strobe, float invert) {
 EMSCRIPTEN_KEEPALIVE
 void pulse(float strength) {
     g_eventPulse = std::clamp(g_eventPulse + strength, 0.0f, 1.5f);
+}
+
+// Neutral blend: 1 = raw images as collected (debug mode), 0 = full treatment.
+// Float so the conductor can animate reveals.
+EMSCRIPTEN_KEEPALIVE
+void setBypass(float bypass) {
+    g_bypass = std::clamp(bypass, 0.0f, 1.0f);
+}
+
+EMSCRIPTEN_KEEPALIVE
+void setAccents(float flashBoost, float tileGutter) {
+    g_flashBoost = std::clamp(flashBoost, 0.0f, 1.0f);
+    g_tileGutter = std::clamp(tileGutter, 0.0f, 1.0f);
+}
+
+// Latest artifact sequence, shown in the binary crawl-counter strip.
+EMSCRIPTEN_KEEPALIVE
+void setSequence(int sequence) {
+    g_sequenceLow = (float)(sequence & 0xFFFF);
 }
 
 } // extern "C"
@@ -1359,7 +1400,7 @@ void createPipelineFade() {
     bglEntries[4].binding    = 4;
     bglEntries[4].visibility = wgpu::ShaderStage::Fragment;
     bglEntries[4].buffer.type= wgpu::BufferBindingType::Uniform;
-    bglEntries[4].buffer.minBindingSize = 96; // RenderParams struct size
+    bglEntries[4].buffer.minBindingSize = 112; // RenderParams struct size
 
     wgpu::BindGroupLayoutDescriptor bglDesc = {};
     bglDesc.entryCount = 5;
@@ -1430,7 +1471,7 @@ void createPipelinePresent() {
     bglEntries[3].binding    = 3;
     bglEntries[3].visibility = wgpu::ShaderStage::Fragment;
     bglEntries[3].buffer.type= wgpu::BufferBindingType::Uniform;
-    bglEntries[3].buffer.minBindingSize = 96; // RenderParams struct size
+    bglEntries[3].buffer.minBindingSize = 112; // RenderParams struct size
 
     wgpu::BindGroupLayoutDescriptor bglDesc = {};
     bglDesc.entryCount = 4;
